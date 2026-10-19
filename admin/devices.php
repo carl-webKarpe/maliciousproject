@@ -79,6 +79,31 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         redirect_back("Token revoked. It can no longer be used to register a device.", false, "#tokens");
     }
 
+    if ($action === "rename_token") {
+        $id = filter_var($_POST["token_id"] ?? "", FILTER_VALIDATE_INT) ?: 0;
+        $label = post_string("label", 100);
+        if ($label === "") {
+            redirect_back("Enter a label for the token.", true, "#tokens");
+        }
+        $stmt = $pdo->prepare("UPDATE enrollment_tokens SET label = ? WHERE id = ?");
+        $stmt->execute([$label, $id]);
+        mg_audit("user", $actorId, "token.renamed", "token:" . $id, ["label" => $label]);
+        redirect_back("Token renamed.", false, "#tokens");
+    }
+
+    if ($action === "delete_token") {
+        // Deleting removes only the token record; a device that already
+        // enrolled with it keeps working, and the audit log keeps the history.
+        $id = filter_var($_POST["token_id"] ?? "", FILTER_VALIDATE_INT) ?: 0;
+        $stmt = $pdo->prepare("DELETE FROM enrollment_tokens WHERE id = ?");
+        $stmt->execute([$id]);
+        if ($stmt->rowCount() === 0) {
+            redirect_back("That token no longer exists.", true, "#tokens");
+        }
+        mg_audit("user", $actorId, "token.deleted", "token:" . $id);
+        redirect_back("Token deleted.", false, "#tokens");
+    }
+
     $deviceId = post_string("device_id", 128);
 
     if ($action === "rename_device") {
@@ -491,8 +516,8 @@ function risk_badge(?string $level): string
                                             <?= hidden_fields($csrf, $returnQuery) ?>
                                             <input type="hidden" name="action" value="rename_device">
                                             <input type="hidden" name="device_id" value="<?= mg_h($device["device_id"]) ?>">
-                                            <input type="hidden" name="display_name" value="">
-                                            <button type="submit" data-rename="<?= mg_h(mg_device_label($device)) ?>"><i class="fa-solid fa-pen" aria-hidden="true"></i>Rename</button>
+                                            <input type="hidden" name="display_name" value="" data-rename-target>
+                                            <button type="submit" data-rename="<?= mg_h(mg_device_label($device)) ?>" data-rename-prompt="New name for this device:"><i class="fa-solid fa-pen" aria-hidden="true"></i>Rename</button>
                                         </form>
                                         <form class="inline" method="post" action="devices.php">
                                             <?= hidden_fields($csrf, $returnQuery) ?>
@@ -543,7 +568,7 @@ function risk_badge(?string $level): string
                 </form>
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Label</th><th>Token</th><th>State</th><th>Created</th><th>Expires</th><th>Used by</th><th></th></tr></thead>
+                        <thead><tr><th>Label</th><th>Token</th><th>State</th><th>Created</th><th>Expires</th><th>Used by</th><th>Actions</th></tr></thead>
                         <tbody>
                         <?php if (!$tokens): ?>
                             <tr><td class="empty" colspan="7">No tokens yet.</td></tr>
@@ -563,14 +588,29 @@ function risk_badge(?string $level): string
                                 <td><?= mg_h($token["expires_at"]) ?></td>
                                 <td><?= $token["used_by_device"] ? "<code>" . mg_h($token["used_by_device"]) . "</code><br><small>" . mg_h($token["used_at"]) . "</small>" : "—" ?></td>
                                 <td>
-                                    <?php if ($tc === "awaiting"): ?>
+                                    <div class="actions">
                                         <form class="inline" method="post" action="devices.php">
                                             <?= hidden_fields($csrf, $returnQuery) ?>
-                                            <input type="hidden" name="action" value="revoke_token">
+                                            <input type="hidden" name="action" value="rename_token">
                                             <input type="hidden" name="token_id" value="<?= (int) $token["id"] ?>">
-                                            <button type="submit" class="danger">Revoke</button>
+                                            <input type="hidden" name="label" value="" data-rename-target>
+                                            <button type="submit" data-rename="<?= mg_h($token["label"]) ?>" data-rename-prompt="New label for this token:"><i class="fa-solid fa-pen" aria-hidden="true"></i>Rename</button>
                                         </form>
-                                    <?php endif; ?>
+                                        <?php if ($tc === "awaiting"): ?>
+                                            <form class="inline" method="post" action="devices.php">
+                                                <?= hidden_fields($csrf, $returnQuery) ?>
+                                                <input type="hidden" name="action" value="revoke_token">
+                                                <input type="hidden" name="token_id" value="<?= (int) $token["id"] ?>">
+                                                <button type="submit" class="danger"><i class="fa-solid fa-ban" aria-hidden="true"></i>Revoke</button>
+                                            </form>
+                                        <?php endif; ?>
+                                        <form class="inline" method="post" action="devices.php">
+                                            <?= hidden_fields($csrf, $returnQuery) ?>
+                                            <input type="hidden" name="action" value="delete_token">
+                                            <input type="hidden" name="token_id" value="<?= (int) $token["id"] ?>">
+                                            <button type="submit" class="danger" data-confirm="Delete the token &quot;<?= mg_h($token["label"]) ?>&quot;?<?= $tc === "awaiting" ? " It can no longer be used to register a computer." : "" ?><?= $tc === "completed" ? " The computer that used it stays registered." : "" ?>"><i class="fa-solid fa-trash" aria-hidden="true"></i>Delete</button>
+                                        </form>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -723,12 +763,12 @@ function risk_badge(?string $level): string
                     return;
                 }
                 if (button && button.dataset.rename !== undefined) {
-                    const name = window.prompt("New name for this device:", button.dataset.rename);
+                    const name = window.prompt(button.dataset.renamePrompt || "New name:", button.dataset.rename);
                     if (name === null || name.trim() === "") {
                         event.preventDefault();
                         return;
                     }
-                    form.querySelector("input[name=display_name]").value = name.trim();
+                    form.querySelector("input[data-rename-target]").value = name.trim();
                 }
                 if (button) {
                     button.disabled = true;
