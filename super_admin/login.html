@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="0; url=../login.html?role=super_admin">
+    <title>Super Admin Sign In | MalwareGuard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        :root {
+            --bg: #08070d;
+            --card: #100d16;
+            --card-border: #29202f;
+            --pink: #ff2f91;
+            --pink-dark: #d91e77;
+            --text: #f5f2f7;
+            --muted: #a9a2ad;
+            --input: #17131d;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family: Arial, Helvetica, sans-serif;
+            color: var(--text);
+            background: radial-gradient(circle at 50% 0%, rgba(255, 47, 145, 0.12), transparent 35%), var(--bg);
+        }
+
+        body.light-mode {
+            --bg: #f8f3f7;
+            --card: #ffffff;
+            --card-border: #f3d8e7;
+            --text: #20171f;
+            --muted: #635560;
+            --input: #fff8fc;
+            background: radial-gradient(circle at 50% 0%, rgba(255, 79, 154, 0.12), transparent 35%), var(--bg);
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            border: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+            z-index: 10;
+        }
+
+        .login-card {
+            width: min(430px, 100%);
+            padding: 34px;
+            border: 1px solid var(--card-border);
+            border-radius: 18px;
+            background: rgba(16, 13, 22, 0.96);
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.55), 0 0 35px rgba(255, 47, 145, 0.05);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .logo {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            border: 1px solid var(--pink);
+            border-radius: 11px;
+            color: var(--pink);
+            box-shadow: 0 0 18px rgba(255, 47, 145, 0.15);
+        }
+
+        .logo-shield {
+            width: 19px;
+            height: 23px;
+            background: var(--pink);
+            clip-path: polygon(50% 0%, 92% 14%, 90% 55%, 72% 82%, 50% 100%, 28% 82%, 10% 55%, 8% 14%);
+            position: relative;
+        }
+
+        .logo-shield::after {
+            content: "";
+            position: absolute;
+            top: 5px;
+            left: 8px;
+            width: 3px;
+            height: 10px;
+            background: #100d16;
+            border-radius: 3px;
+        }
+
+        .brand-name {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .brand-name span {
+            color: var(--pink);
+        }
+
+        .tagline {
+            color: var(--muted);
+            font-size: 13px;
+            margin-left: 54px;
+            margin-bottom: 32px;
+        }
+
+        .eyebrow {
+            color: var(--pink);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            margin-bottom: 7px;
+        }
+
+        h1 {
+            font-size: 30px;
+            line-height: 1.15;
+            margin-bottom: 7px;
+        }
+
+        .subtitle {
+            margin: 0 0 26px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .field {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        input[type="email"],
+        input[type="password"],
+        input[type="text"] {
+            width: 100%;
+            height: 46px;
+            padding: 0 14px;
+            border: 1px solid #342b3b;
+            border-radius: 8px;
+            background: var(--input);
+            color: var(--text);
+            outline: none;
+            font-size: 14px;
+            transition: 0.2s ease;
+        }
+
+        input:focus {
+            border-color: var(--pink);
+            box-shadow: 0 0 0 3px rgba(255, 47, 145, 0.12);
+        }
+
+        .password-input {
+            padding-right: 48px !important;
+        }
+
+        .toggle-password {
+            position: absolute;
+            top: 50%;
+            right: 7px;
+            transform: translateY(-50%);
+            width: 34px;
+            height: 34px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: #aaa2ad;
+            cursor: pointer;
+        }
+
+        .toggle-password:hover {
+            color: var(--pink);
+            background: rgba(255, 47, 145, 0.08);
+        }
+
+        .sign-in {
+            width: 100%;
+            height: 46px;
+            margin-top: 8px;
+            border: 0;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--pink), var(--pink-dark));
+            color: white;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.2s ease;
+        }
+
+        .sign-in:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 25px rgba(255, 47, 145, 0.25);
+        }
+
+        .security {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            margin-top: 22px;
+            padding: 12px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.025);
+            color: #aaa4ad;
+            font-size: 11px;
+        }
+
+        .security-icon {
+            width: 17px;
+            height: 17px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            background: #d8d5da;
+            color: #16131a;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .secondary-links {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 18px;
+            font-size: 13px;
+        }
+
+        .secondary-links a {
+            color: var(--pink);
+            text-decoration: none;
+        }
+
+        .secondary-links a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 480px) {
+            body { padding: 14px; }
+            .login-card { padding: 25px 20px; border-radius: 14px; }
+            h1 { font-size: 26px; }
+            .tagline { margin-left: 0; }
+            .secondary-links { flex-direction: column; text-align: center; }
+        }
+    </style>
+</head>
+<body>
+    <button class="theme-toggle" type="button" aria-label="Switch to light mode">
+        <i class="fa-solid fa-moon"></i>
+    </button>
+
+    <main class="login-card">
+        <div class="brand">
+            <div class="logo"><div class="logo-shield"></div></div>
+            <div class="brand-name">Malware<span>Guard</span></div>
+        </div>
+
+        <p class="tagline">Privileged access</p>
+
+        <div class="eyebrow">SUPER ADMIN</div>
+        <h1>Super Admin</h1>
+        <p class="subtitle">Sign in to review user activity. A one-time code will be sent to your account email.</p>
+
+        <form action="../login.php" method="post">
+            <input type="hidden" name="login_type" value="super_admin">
+
+            <div class="field">
+                <label for="email">Super-admin Gmail</label>
+                <div class="input-wrapper">
+                    <input id="email" name="email" type="email" autocomplete="username" placeholder="Enter your Gmail" required>
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="password">Password</label>
+                <div class="input-wrapper">
+                    <input id="password" name="password" type="password" class="password-input" autocomplete="current-password" placeholder="Enter your password" required>
+                    <button type="button" class="toggle-password" id="togglePassword" aria-label="Show password">👁</button>
+                </div>
+            </div>
+
+            <button type="submit" class="sign-in">Continue to email verification</button>
+        </form>
+
+        <div class="secondary-links">
+            <a href="../admin/login.html">Admin sign in</a>
+            <a href="../login.html?role=user">User sign in</a>
+        </div>
+
+        <div class="security">
+            <span class="security-icon">✓</span>
+            <span>Access is granted only after password and email-code verification.</span>
+        </div>
+    </main>
+
+    <script>
+        const password = document.getElementById("password");
+        const togglePassword = document.getElementById("togglePassword");
+        togglePassword.addEventListener("click", () => {
+            const isHidden = password.type === "password";
+            password.type = isHidden ? "text" : "password";
+            togglePassword.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+            togglePassword.textContent = isHidden ? "🙈" : "👁";
+        });
+    </script>
+    <script src="../assets/js/script.js"></script>
+</body>
+</html>

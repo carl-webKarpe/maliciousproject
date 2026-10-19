@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify SMS | MalwareGuard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        :root {
+            --pink: #ff4f9a;
+            --pink-light: #ff80b5;
+            --pink-dark: #d9367c;
+            --pink-glow: rgba(255, 79, 154, 0.35);
+            --background: #0b0710;
+            --border: #3a1c32;
+            --text: #f8eaf2;
+            --muted: #a8909d;
+            --card-bg: linear-gradient(145deg, rgba(22, 13, 25, 0.97), rgba(17, 9, 20, 0.97));
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 20px;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: radial-gradient(circle at 50% 0%, rgba(255, 79, 154, 0.14), transparent 32%), var(--background);
+            color: var(--text);
+        }
+
+        body.light-mode {
+            --background: #f8f3f7;
+            --border: #f0d6e8;
+            --text: #20171f;
+            --muted: #635560;
+            --card-bg: linear-gradient(145deg, rgba(255,255,255,0.96), rgba(255,244,250,0.97));
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+            z-index: 10;
+        }
+
+        .auth-card {
+            width: 100%;
+            max-width: 430px;
+            padding: 32px 26px 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.45), 0 0 45px rgba(255, 79, 154, 0.06);
+            text-align: center;
+        }
+
+        .auth-logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 18px;
+            font-size: 26px;
+            font-weight: 800;
+        }
+
+        .logo-shield {
+            width: 42px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--pink);
+            border-radius: 12px;
+            color: var(--pink);
+            box-shadow: 0 0 18px var(--pink-glow);
+        }
+
+        .access-card {
+            padding: 18px 0 10px;
+        }
+
+        .access-icon {
+            width: 64px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 18px;
+            border-radius: 18px;
+            background: rgba(255, 79, 154, 0.08);
+            border: 1px solid var(--border);
+            color: var(--pink);
+            font-size: 28px;
+            box-shadow: 0 0 18px rgba(255, 79, 154, 0.12);
+        }
+
+        .access-card h1 {
+            margin-bottom: 10px;
+            font-size: 30px;
+            font-weight: 800;
+        }
+
+        .access-card p {
+            margin-bottom: 24px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .code-inputs {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 22px;
+        }
+
+        .code-input {
+            width: 100%;
+            height: 62px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: rgba(8, 5, 11, 0.65);
+            color: var(--text);
+            text-align: center;
+            font-size: 28px;
+            font-weight: 700;
+            outline: none;
+            transition: 0.3s ease;
+        }
+
+        .code-input:focus {
+            border-color: var(--pink);
+            box-shadow: 0 0 0 3px rgba(255, 79, 154, 0.1), 0 0 18px rgba(255, 79, 154, 0.08);
+        }
+
+        .verify-btn {
+            width: 100%;
+            height: 52px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--pink), var(--pink-dark));
+            color: white;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 0 25px var(--pink-glow);
+            transition: 0.3s ease;
+        }
+
+        .verify-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 18px var(--pink), 0 0 35px var(--pink-glow);
+        }
+
+        .resend-text {
+            margin-top: 18px;
+            margin-bottom: 0;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .resend-btn {
+            background: transparent;
+            border: none;
+            color: var(--pink);
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .status-box {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: rgba(255, 79, 154, 0.08);
+            border: 1px solid rgba(255, 79, 154, 0.24);
+            color: var(--pink-light);
+            font-size: 12px;
+            line-height: 1.4;
+            display: none;
+        }
+
+        .back-link {
+            margin-top: 16px;
+            display: block;
+            color: var(--pink);
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        @media (max-width: 480px) {
+            .auth-card {
+                padding: 26px 18px 20px;
+                border-radius: 18px;
+            }
+
+            .access-card h1 {
+                font-size: 26px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-card">
+        <div class="auth-logo">
+            <div class="logo-shield">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <span>Malware<span>Guard</span></span>
+        </div>
+
+        <button class="theme-toggle" type="button" aria-label="Switch to light mode">
+            <i class="fa-solid fa-moon"></i>
+        </button>
+
+        <div class="access-card">
+            <div class="access-icon">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+
+            <h1>Enter Access Code</h1>
+            <p id="phoneLabel">A 6-digit code has been sent to your device.</p>
+
+            <div class="code-inputs" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
+                <input class="code-input" maxlength="1" inputmode="numeric" autofocus>
+                <input class="code-input" maxlength="1" inputmode="numeric">
+                <input class="code-input" maxlength="1" inputmode="numeric">
+                <input class="code-input" maxlength="1" inputmode="numeric">
+                <input class="code-input" maxlength="1" inputmode="numeric">
+                <input class="code-input" maxlength="1" inputmode="numeric">
+            </div>
+
+            <button id="verifyBtn" class="verify-btn" type="button">
+                <i class="fa-solid fa-shield-check"></i>
+                Verify Code
+            </button>
+
+            <div id="statusBox" class="status-box"></div>
+
+            <p class="resend-text">
+                Didn't receive it?
+                <button id="resendBtn" class="resend-btn" type="button">Resend</button>
+            </p>
+
+            <a href="registration.html" class="back-link">Back to registration</a>
+        </div>
+    </div>
+
+    <script src="assets/js/script.js"></script>
+    <script>
+        const codeInputs = document.querySelectorAll('.code-input');
+        const statusBox = document.getElementById('statusBox');
+        const verifyBtn = document.getElementById('verifyBtn');
+        const resendBtn = document.getElementById('resendBtn');
+        const phoneLabel = document.getElementById('phoneLabel');
+
+        const params = new URLSearchParams(window.location.search);
+        const maskedPhone = params.get('p') || 'your phone';
+        phoneLabel.textContent = 'A 6-digit code has been sent to ' + maskedPhone + '.';
+
+        function showStatus(message) {
+            statusBox.textContent = message;
+            statusBox.style.display = 'block';
+        }
+
+        function getCode() {
+            return Array.from(codeInputs).map((input) => input.value).join('').trim();
+        }
+
+        async function sendCode() {
+            try {
+                const response = await fetch('send_sms.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams({})
+                });
+
+                const result = await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Unable to send SMS code.');
+                }
+
+                showStatus(result.demo_code ? 'New code sent. Demo code: ' + result.demo_code : 'New code sent successfully.');
+                codeInputs[0].focus();
+            } catch (error) {
+                showStatus(error.message);
+            }
+        }
+
+        resendBtn.addEventListener('click', sendCode);
+
+        codeInputs.forEach((input, index) => {
+            input.addEventListener('input', function () {
+                this.value = this.value.replace(/\D/g, '').slice(0, 1);
+                if (this.value && index < codeInputs.length - 1) {
+                    codeInputs[index + 1].focus();
+                }
+            });
+
+            input.addEventListener('keydown', function (event) {
+                if (event.key === 'Backspace' && !this.value && index > 0) {
+                    codeInputs[index - 1].focus();
+                }
+            });
+        });
+
+        verifyBtn.addEventListener('click', function () {
+            const code = getCode();
+
+            if (code.length !== 6) {
+                showStatus('Please enter the full 6-digit code.');
+                return;
+            }
+
+            fetch('register.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({ sms_code: code })
+            }).then(async function (response) {
+                const text = await response.text();
+
+                if (response.ok && text.includes('Location:')) {
+                    window.location.href = 'login.html?role=user&registered=1';
+                    return;
+                }
+
+                if (response.redirected) {
+                    window.location.href = 'login.html?role=user&registered=1';
+                    return;
+                }
+
+                showStatus(text || 'Verification failed. Please try again.');
+            }).catch(function () {
+                showStatus('Unable to verify your code right now.');
+            });
+        });
+
+        sendCode();
+    </script>
+</body>
+</html>
