@@ -825,7 +825,12 @@ def pid_alive(pid: int) -> bool:
 
 
 def cmd_enroll(config: Config, args: argparse.Namespace) -> int:
-    if args.server:
+    if args.server is not None:
+        # The installer always passes --server; a blank answer must not fall
+        # back silently to whatever address is already in the config file.
+        if not args.server.strip():
+            raise AgentError("The server address is empty. Type it in full, for example http://127.0.0.1:8000 "
+                             "(same PC as the server) or http://192.168.1.87:8000 (another PC).")
         config["server_url"] = args.server.strip().rstrip("/")
     if args.name:
         config["device_name"] = args.name
