@@ -70,6 +70,7 @@ nav a:last-child:hover { background: var(--pink); color: #fff; }
 .sidebar a { display: flex; align-items: center; gap: 11px; min-height: 42px; padding: 0 11px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); font-size: 14px; font-weight: 600; }
 .sidebar a:hover, .sidebar a[aria-current="page"] { border-color: rgba(255, 79, 154, 0.25); background: rgba(255, 79, 154, 0.1); color: var(--pink); }
 .sidebar a i { width: 18px; text-align: center; }
+.sidebar a.sidebar-sub { min-height: 34px; margin-left: 18px; padding-left: 12px; border-left: 1px solid var(--border); border-radius: 0 7px 7px 0; font-size: 13px; }
 .sidebar .sidebar-logout { margin-top: 8px; border-top: 1px solid var(--border); border-radius: 0; }
 
 main { min-width: 0; padding: 10px 0 24px; }

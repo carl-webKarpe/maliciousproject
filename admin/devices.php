@@ -400,14 +400,20 @@ function risk_badge(?string $level): string
         </nav>
     </header>
     <div class="workspace">
-        <aside class="sidebar" aria-label="Device navigation">
-            <div class="sidebar-label">DEVICES</div>
-            <a href="#overview" aria-current="page"><i class="fa-solid fa-chart-line" aria-hidden="true"></i>Overview</a>
-            <a href="#devices"><i class="fa-solid fa-desktop" aria-hidden="true"></i>Computers</a>
-            <a href="#tokens"><i class="fa-solid fa-key" aria-hidden="true"></i>Enrollment tokens</a>
-            <a href="#events"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i>File events</a>
-            <a href="#scans"><i class="fa-solid fa-shield-virus" aria-hidden="true"></i>Agent scans</a>
-            <a href="dashboard.php"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>Upload scans</a>
+        <aside class="sidebar" aria-label="Admin navigation">
+            <!-- Same WORKSPACE links as admin/dashboard.php, so the sidebar does not change between pages. -->
+            <div class="sidebar-label">WORKSPACE</div>
+            <a href="dashboard.php#dashboard"><i class="fa-solid fa-chart-line" aria-hidden="true"></i>Dashboard</a>
+            <a href="dashboard.php#file-scanner"><i class="fa-solid fa-shield-virus" aria-hidden="true"></i>File Scanner</a>
+            <a href="dashboard.php#scan-history"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>Scan History</a>
+            <a href="dashboard.php#threats"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Threats</a>
+            <a href="dashboard.php#quarantine"><i class="fa-solid fa-box-archive" aria-hidden="true"></i>Quarantine</a>
+            <a href="devices.php" aria-current="page"><i class="fa-solid fa-desktop" aria-hidden="true"></i>Devices</a>
+            <a class="sidebar-sub" href="#devices"><i class="fa-solid fa-laptop" aria-hidden="true"></i>Computers</a>
+            <a class="sidebar-sub" href="#tokens"><i class="fa-solid fa-key" aria-hidden="true"></i>Enrollment tokens</a>
+            <a class="sidebar-sub" href="#events"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i>File events</a>
+            <a class="sidebar-sub" href="#scans"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>Agent scans</a>
+            <a href="dashboard.php#settings"><i class="fa-solid fa-gear" aria-hidden="true"></i>Settings</a>
             <a class="sidebar-logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>Sign out</a>
         </aside>
 
