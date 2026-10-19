@@ -3,6 +3,7 @@
 session_start();
 
 require_once "db.php";
+require_once __DIR__ . DIRECTORY_SEPARATOR . "includes" . DIRECTORY_SEPARATOR . "bootstrap.php";
 
 
 // Only allow POST requests
@@ -46,6 +47,22 @@ if ($email === "" || $password === "") {
 }
 
 
+
+
+// Rate limit: 20 attempts per address and 8 per account every 15 minutes.
+
+try {
+    $withinLimit = mg_rate_limit("login:ip:" . mg_client_ip(), 20, 900)
+        && mg_rate_limit("login:email:" . strtolower($email), 8, 900);
+} catch (Throwable $e) {
+    error_log("Login rate limiter unavailable: " . $e->getMessage());
+    $withinLimit = true;
+}
+
+if (!$withinLimit) {
+    $conn->close();
+    $redirectLoginError($loginType, "locked");
+}
 
 
 // Find user

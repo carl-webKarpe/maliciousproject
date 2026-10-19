@@ -16,6 +16,7 @@ if ($isAdminWorkspace) {
         ["admin/dashboard.php#scan-history", "fa-clock-rotate-left", "Scan History", "history"],
         ["admin/dashboard.php#threats", "fa-triangle-exclamation", "Threats", ""],
         ["admin/dashboard.php#quarantine", "fa-box-archive", "Quarantine", ""],
+        ["admin/devices.php", "fa-desktop", "Devices", ""],
         ["admin/dashboard.php#settings", "fa-gear", "Settings", ""]
     ];
 } else {

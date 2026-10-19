@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . DIRECTORY_SEPARATOR . ".." . DIRECTORY_SEPARATOR . "db.php";
+require_once __DIR__ . DIRECTORY_SEPARATOR . ".." . DIRECTORY_SEPARATOR . "includes" . DIRECTORY_SEPARATOR . "devices.php";
 
 if (!isset($_SESSION["logged_in"]) || $_SESSION["logged_in"] !== true) {
     header("Location: ../login.html");
@@ -138,21 +139,13 @@ $stmt->execute();
 $users = $stmt->get_result();
 $stmt->close();
 
-$endpointDevicesStmt = $conn->prepare(
-    "SELECT device_id, hostname, username, os_name, last_seen_at FROM endpoint_devices ORDER BY last_seen_at DESC, id DESC LIMIT 10"
-);
-$endpointDevicesStmt->execute();
-$endpointDevices = $endpointDevicesStmt->get_result();
-$endpointDevicesStmt->close();
-
-$endpointSummaryStmt = $conn->prepare(
-    "SELECT COUNT(*) AS total_devices,
-            SUM(CASE WHEN last_seen_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) AS active_devices
-     FROM endpoint_devices"
-);
-$endpointSummaryStmt->execute();
-$endpointSummary = $endpointSummaryStmt->get_result()->fetch_assoc();
-$endpointSummaryStmt->close();
+// Online status comes from recent authenticated heartbeats (includes/devices.php).
+$endpointPdo = mg_pdo();
+$endpointDevices = $endpointPdo->query(
+    "SELECT " . MG_DEVICE_COLUMNS . " FROM endpoint_devices d
+     ORDER BY d.last_heartbeat_at IS NULL, d.last_heartbeat_at DESC, d.id DESC LIMIT 10"
+)->fetchAll();
+$endpointSummary = mg_device_summary($endpointPdo);
 
 $endpointAlertsStmt = $conn->prepare(
     "SELECT a.device_id, d.hostname, a.alert_type, a.severity, a.message, a.status, a.created_at
@@ -649,6 +642,7 @@ $conn->close();
             <a href="#scan-activity"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>Scan Activity</a>
             <a href="#security-logs"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>Security Logs</a>
             <a href="#endpoint-monitoring"><i class="fa-solid fa-desktop" aria-hidden="true"></i>Security Agents</a>
+            <a href="../admin/devices.php"><i class="fa-solid fa-laptop-code" aria-hidden="true"></i>Device Management</a>
             <a href="#recent-endpoint-detections"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Recent Detections</a>
             <a href="#user-accounts"><i class="fa-solid fa-users" aria-hidden="true"></i>User Accounts</a>
             <a href="#admin-management"><i class="fa-solid fa-user-gear" aria-hidden="true"></i>Manage Admins</a>
@@ -686,30 +680,31 @@ $conn->close();
             <div class="panel" id="endpoint-monitoring">
                 <div class="panel-head">
                     <div class="panel-title">Endpoint devices</div>
-                    <span class="badge"><?php echo (int) ($endpointSummary['total_devices'] ?? 0); ?> total</span>
+                    <span class="badge"><?php echo (int) $endpointSummary['total']; ?> registered</span>
                 </div>
                 <div class="panel-body">
-                    <?php if ($endpointDevices->num_rows > 0): ?>
+                    <?php if ($endpointDevices): ?>
                         <table>
                             <thead>
                                 <tr>
                                     <th>Device</th>
-                                    <th>Username</th>
-                                    <th>Last seen</th>
+                                    <th>Status</th>
+                                    <th>Last heartbeat</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php while ($device = $endpointDevices->fetch_assoc()): ?>
+                                <?php foreach ($endpointDevices as $device): ?>
+                                    <?php [, $deviceStatusLabel] = mg_device_status($device); ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($device['hostname'] ?: $device['device_id']); ?></td>
-                                        <td><?php echo htmlspecialchars($device['username'] ?: 'Unknown'); ?></td>
-                                        <td><?php echo htmlspecialchars($device['last_seen_at'] ?: 'Never'); ?></td>
+                                        <td><?php echo htmlspecialchars(mg_device_label($device)); ?></td>
+                                        <td><?php echo htmlspecialchars($deviceStatusLabel); ?></td>
+                                        <td><?php echo htmlspecialchars($device['last_heartbeat_at'] ?: 'Never'); ?></td>
                                     </tr>
-                                <?php endwhile; ?>
+                                <?php endforeach; ?>
                             </tbody>
                         </table>
                     <?php else: ?>
-                        <p style="margin:0;color:var(--muted);">No endpoint agents have registered yet.</p>
+                        <p style="margin:0;color:var(--muted);">No endpoint agents have registered yet. <a href="../admin/devices.php#tokens">Generate an enrollment token</a> to add a computer.</p>
                     <?php endif; ?>
                 </div>
             </div>
@@ -717,12 +712,13 @@ $conn->close();
             <div class="panel" id="endpoint-health">
                 <div class="panel-head">
                     <div class="panel-title"></div>
-                    <span class="badge"><?php echo (int) ($endpointSummary['active_devices'] ?? 0); ?> active</span>
+                    <span class="badge"><?php echo (int) $endpointSummary['online']; ?> online</span>
                 </div>
                 <div class="panel-body">
                     <p style="margin-top:0;color:var(--muted);line-height:1.7;">
                         Windows endpoint telemetry is stored only after a consented agent registers and sends heartbeat data. This is a separate channel from the browser-based file scan flow and requires a local agent on the host device.
                     </p>
+                    <p style="margin:0;"><a href="../admin/devices.php"><i class="fa-solid fa-desktop" aria-hidden="true"></i> Manage devices, tokens, file events and agent scans</a></p>
                 </div>
             </div>
         </section>

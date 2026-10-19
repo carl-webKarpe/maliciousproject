@@ -442,7 +442,8 @@
     const loginErrors = {
       invalid: "Invalid email or password for the selected account type.",
       inactive: "This account is inactive. Contact the system administrator.",
-      required: "Enter your email and password to continue."
+      required: "Enter your email and password to continue.",
+      locked: "Too many sign-in attempts. Wait 15 minutes and try again."
     };
     const loginError = document.getElementById("loginError");
     const errorMessage = loginErrors[new URLSearchParams(window.location.search).get("error")];

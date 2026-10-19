@@ -24,7 +24,8 @@ $requestedScanId = filter_input(INPUT_GET, "scan_id", FILTER_VALIDATE_INT);
 
 if ($requestedScanId !== false && $requestedScanId !== null && $requestedScanId > 0) {
     $resultStmt = $conn->prepare(
-        "SELECT id, original_file_name, file_size, file_type, file_hash, detection_status, threat_level, security_score, analysis_result, scanned_at
+        "SELECT id, original_file_name, file_size, file_type, file_hash, detection_status, threat_level, security_score, analysis_result, scanned_at,
+                vt_status, vt_malicious, vt_engines, detection_source, recommended_action
          FROM scans
          WHERE id = ? AND user_id = ?
          LIMIT 1"
@@ -405,6 +406,7 @@ function e($value): string {
             <a href="#scan-history"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>Scan History</a>
             <a href="#threats"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Threats</a>
             <a href="#quarantine"><i class="fa-solid fa-box-archive" aria-hidden="true"></i>Quarantine</a>
+            <a href="devices.php"><i class="fa-solid fa-desktop" aria-hidden="true"></i>Devices</a>
             <a href="#settings"><i class="fa-solid fa-gear" aria-hidden="true"></i>Settings</a>
             <a class="sidebar-logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>Sign out</a>
         </aside>
@@ -422,7 +424,7 @@ function e($value): string {
             </div>
             <div class="feature-card">
                 <strong>Endpoint telemetry</strong>
-                <span>Consented Windows agents can report device heartbeats and process snapshots.</span>
+                <span>Enrolled Windows agents report heartbeats and file activity in approved folders. <a href="devices.php">Manage devices</a>.</span>
             </div>
         </section>
         <section class="scanner-panel" id="file-scanner">
@@ -454,9 +456,14 @@ function e($value): string {
                 <div class="scan-result-summary">
                     <div><span>File</span><strong><?php echo e($scanResult["original_file_name"]); ?></strong></div>
                     <div><span>Threat level</span><strong><?php echo e(strtoupper($scanResult["threat_level"])); ?></strong></div>
-                    <div><span>Security score</span><strong><?php echo e($scanResult["security_score"]); ?>%</strong></div>
+                    <div><span>Security score</span><strong><?php echo e($scanResult["security_score"]); ?>/100</strong></div>
                     <div><span>Scanned</span><strong><?php echo e($scanResult["scanned_at"]); ?></strong></div>
+                    <div><span>SHA-256</span><strong style="font-size:12px;"><?php echo e($scanResult["file_hash"]); ?></strong></div>
+                    <div><span>Size</span><strong><?php echo number_format((int) $scanResult["file_size"]); ?> bytes</strong></div>
+                    <div><span>Detection ratio</span><strong><?php echo ($scanResult["vt_status"] ?? "") === "found" ? e($scanResult["vt_malicious"] . "/" . $scanResult["vt_engines"]) . " VirusTotal" : "Not available (" . e(str_replace("_", " ", (string) ($scanResult["vt_status"] ?? "not checked"))) . ")"; ?></strong></div>
+                    <div><span>Detection source</span><strong><?php echo e($scanResult["detection_source"] ?: "MalwareGuard static rules"); ?></strong></div>
                 </div>
+                <div class="scan-result-description"><strong>Recommended next action:</strong> <?php echo e($scanResult["recommended_action"] ?: "Review the findings below."); ?><br><small style="color:var(--muted);">The security score is 100 minus the points of matched rule indicators. It is not a probability that the file is safe.</small></div>
                 <?php if (!empty($scanResult["analysis_result"])): ?>
                     <div class="scan-result-description"><?php echo nl2br(e($scanResult["analysis_result"])); ?></div>
                 <?php endif; ?>

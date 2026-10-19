@@ -48,7 +48,7 @@ echo "Super-admin Gmail address: ";
 $email = strtolower(trim(fgets(STDIN)));
 echo "Super-admin name: ";
 $name = trim(fgets(STDIN));
-$password = getenv("SUPER_ADMIN_PASSWORD") ?: "";
+$password = malwareGuardSetting("SUPER_ADMIN_PASSWORD");
 
 if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !str_ends_with($email, "@gmail.com")) {
     exit("A valid @gmail.com address is required.\n");

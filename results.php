@@ -61,7 +61,12 @@ $stmt = $conn->prepare(
         analysis_result,
         scan_engine,
         scanned_at,
-        created_at
+        created_at,
+        vt_status,
+        vt_malicious,
+        vt_engines,
+        detection_source,
+        recommended_action
      FROM scans
      WHERE id = ?
      AND user_id = ?
@@ -1279,6 +1284,18 @@ require __DIR__ . "/includes/workspace_sidebar.php";
                         ) ?>
                     </p>
 
+                    <?php if (!empty($scan["recommended_action"])): ?>
+                        <p><strong>Recommended next action:</strong> <?= escape($scan["recommended_action"]) ?></p>
+                    <?php endif; ?>
+
+                    <p>
+                        <strong>Detection ratio:</strong>
+                        <?= ($scan["vt_status"] ?? "") === "found"
+                            ? escape($scan["vt_malicious"] . "/" . $scan["vt_engines"]) . " VirusTotal engines"
+                            : "not available (" . escape(str_replace("_", " ", (string) ($scan["vt_status"] ?? "not checked"))) . ")" ?>
+                        &middot; <strong>Source:</strong> <?= escape($scan["detection_source"] ?? "MalwareGuard static rules") ?>
+                    </p>
+
                 </div>
 
 
@@ -1301,7 +1318,7 @@ require __DIR__ . "/includes/workspace_sidebar.php";
                         </strong>
 
                         <span>
-                            Analysis confidence score
+                            Rule-based score: 100 minus matched indicator points. Not a probability.
                         </span>
 
                     </div>

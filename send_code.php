@@ -23,7 +23,6 @@ $_SESSION["sms_code"] = password_hash($code, PASSWORD_DEFAULT); // stored hashed
 $_SESSION["sms_expires_at"] = time() + 600;                     // 10 minutes
 $_SESSION["sms_attempts"] = 0;
 $_SESSION["sms_last_sent"] = time();
-$_SESSION["sms_demo_code"] = $code;
 
 $isLocal = in_array($_SERVER["REMOTE_ADDR"] ?? "", ["127.0.0.1", "::1"], true);
 

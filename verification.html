@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify SMS | MalwareGuard</title>
+    <title>Verify Email | MalwareGuard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <style>
         :root {
@@ -273,8 +273,7 @@
         const phoneLabel = document.getElementById('phoneLabel');
 
         const params = new URLSearchParams(window.location.search);
-        const maskedPhone = params.get('p') || 'your phone';
-        phoneLabel.textContent = 'A 6-digit code has been sent to ' + maskedPhone + '.';
+        phoneLabel.textContent = 'A 6-digit code has been sent to the email address you registered with.';
 
         function showStatus(message) {
             statusBox.textContent = message;
@@ -287,7 +286,7 @@
 
         async function sendCode() {
             try {
-                const response = await fetch('send_sms.php', {
+                const response = await fetch('send_code.php', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
@@ -298,7 +297,7 @@
                 const result = await response.json();
 
                 if (!response.ok || !result.success) {
-                    throw new Error(result.message || 'Unable to send SMS code.');
+                    throw new Error(result.message || 'Unable to send the verification code.');
                 }
 
                 showStatus(result.demo_code ? 'New code sent. Demo code: ' + result.demo_code : 'New code sent successfully.');

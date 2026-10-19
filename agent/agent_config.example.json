@@ -1,0 +1,15 @@
+{
+  "server_url": "http://192.168.1.10:8000",
+  "device_name": "",
+  "device_id": "",
+  "enrollment_token": "",
+  "watch_directories": ["{DOWNLOADS}"],
+  "recursive": false,
+  "heartbeat_interval": 30,
+  "send_interval": 5,
+  "settle_seconds": 3,
+  "max_hash_mb": 200,
+  "log_directory": "logs",
+  "ca_bundle": "",
+  "allow_http_on_public_networks": false
+}
