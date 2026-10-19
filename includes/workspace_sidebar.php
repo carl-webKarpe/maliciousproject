@@ -11,13 +11,13 @@ $currentWorkspaceLink = $activeWorkspacePage === "scan.php"
 
 if ($isAdminWorkspace) {
     $workspaceLinks = [
-        ["admin/dashboard.php#dashboard", "fa-chart-line", "Dashboard", ""],
-        ["scan.php", "fa-shield-virus", "File Scanner", "scanner"],
-        ["admin/dashboard.php#scan-history", "fa-clock-rotate-left", "Scan History", "history"],
-        ["admin/dashboard.php#threats", "fa-triangle-exclamation", "Threats", ""],
-        ["admin/dashboard.php#quarantine", "fa-box-archive", "Quarantine", ""],
-        ["admin/devices.php", "fa-desktop", "Devices", ""],
-        ["admin/dashboard.php#settings", "fa-gear", "Settings", ""]
+        ["admin/dashboard.php", "fa-house", "Dashboard", ""],
+        ["admin/dashboard.php?view=scanner", "fa-shield-virus", "File Scanner", "scanner"],
+        ["admin/dashboard.php?view=history", "fa-clock-rotate-left", "Scan History", "history"],
+        ["admin/dashboard.php?view=threats", "fa-triangle-exclamation", "Threats", ""],
+        ["admin/devices.php?view=computers", "fa-desktop", "Computers", ""],
+        ["admin/devices.php?view=events", "fa-file-arrow-down", "File events", ""],
+        ["admin/dashboard.php?view=settings", "fa-gear", "Settings", ""]
     ];
 } else {
     $workspaceLinks = [

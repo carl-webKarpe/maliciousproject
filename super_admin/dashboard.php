@@ -642,7 +642,7 @@ $conn->close();
             <a href="#scan-activity"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>Scan Activity</a>
             <a href="#security-logs"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>Security Logs</a>
             <a href="#endpoint-monitoring"><i class="fa-solid fa-desktop" aria-hidden="true"></i>Security Agents</a>
-            <a href="../admin/devices.php"><i class="fa-solid fa-laptop-code" aria-hidden="true"></i>Device Management</a>
+            <a href="../admin/dashboard.php"><i class="fa-solid fa-laptop-code" aria-hidden="true"></i>Admin Dashboard</a>
             <a href="#recent-endpoint-detections"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Recent Detections</a>
             <a href="#user-accounts"><i class="fa-solid fa-users" aria-hidden="true"></i>User Accounts</a>
             <a href="#admin-management"><i class="fa-solid fa-user-gear" aria-hidden="true"></i>Manage Admins</a>
@@ -704,7 +704,7 @@ $conn->close();
                             </tbody>
                         </table>
                     <?php else: ?>
-                        <p style="margin:0;color:var(--muted);">No endpoint agents have registered yet. <a href="../admin/devices.php#tokens">Generate an enrollment token</a> to add a computer.</p>
+                        <p style="margin:0;color:var(--muted);">No endpoint agents have registered yet. <a href="../admin/devices.php?view=tokens">Generate an enrollment token</a> to add a computer.</p>
                     <?php endif; ?>
                 </div>
             </div>
