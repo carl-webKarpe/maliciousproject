@@ -6,6 +6,8 @@ MalwareGuard monitors **authorized** Windows PCs and laptops for new and changed
 - **Agent:** a small Python program installed on each monitored computer.
 - **Dashboard:** user scanning pages, an admin scan-activity dashboard, a device management page, and a super-admin user database.
 
+**New here? Follow [SETUP.md](SETUP.md)** for a step-by-step installation and start-up guide.
+
 > Install the agent only on computers you own or are authorized to monitor, and tell the people who use them. The agent watches only the folders listed in its configuration (by default the user's Downloads folder). It does not collect passwords, browser history, messages or keystrokes, and it never runs, deletes or moves files.
 
 ---
