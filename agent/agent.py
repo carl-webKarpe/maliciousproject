@@ -837,7 +837,9 @@ def cmd_enroll(config: Config, args: argparse.Namespace) -> int:
     token = (args.token or str(config["enrollment_token"])).strip()
     if not token:
         raise AgentError("Provide the enrollment token from the dashboard: --token TOKEN")
-    if not config["device_id"]:
+    # A folder copied from another computer carries that computer's device ID;
+    # reusing it would collide with the other computer's registration.
+    if not config["device_id"] or config.data.get("enrolled_hostname") != socket.gethostname():
         config["device_id"] = str(uuid.uuid4())
 
     api = ApiClient(config)
@@ -858,6 +860,7 @@ def cmd_enroll(config: Config, args: argparse.Namespace) -> int:
 
     CredentialStore(config.data_dir).save(str(response["device_credential"]))
     config["device_id"] = response["device_id"]
+    config["enrolled_hostname"] = socket.gethostname()
     config["heartbeat_interval"] = int(response.get("heartbeat_interval", config["heartbeat_interval"]))
     config["enrollment_token"] = ""  # single-use; never keep it around
     config.save()

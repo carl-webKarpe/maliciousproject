@@ -27,6 +27,14 @@ if not defined PY (
 echo [OK]    Python found
 
 rem --- Private environment with the agent's dependencies ---------------------
+rem A .venv copied from another computer points at that computer's Python
+rem and cannot run here; rebuild it.
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" -c "import sys" >nul 2>&1 || (
+        echo [....]  agent\.venv was made on another computer; rebuilding it for this one.
+        rmdir /s /q ".venv"
+    )
+)
 if not exist ".venv\Scripts\python.exe" (
     echo [....]  Creating the agent's Python environment in agent\.venv
     %PY% -m venv .venv || (echo [FAIL]  Could not create the virtual environment. & goto :failed)
