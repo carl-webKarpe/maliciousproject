@@ -285,6 +285,12 @@ class ApiClient:
             body = response.json()
         except ValueError:
             body = {}
+        if response.status_code == 404 and "error" not in body:
+            # A web page, not the MalwareGuard API: the address points at the wrong folder.
+            raise ServerError(404, "not_found",
+                              f"No MalwareGuard server at {self.base} (HTTP 404). Open {self.base}/api/health.php "
+                              "in a browser; it must show \"ok\":true. With XAMPP the address is "
+                              "http://IP/<project folder name inside htdocs>.")
         if response.status_code != 200 or not body.get("ok"):
             raise ServerError(response.status_code, str(body.get("error", "http_error")),
                               str(body.get("message", f"HTTP {response.status_code}")))
