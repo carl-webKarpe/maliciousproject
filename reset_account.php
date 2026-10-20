@@ -27,6 +27,14 @@ try {
     exit("Cannot connect to the database: " . $e->getMessage() . "\nCheck that MySQL is running and DB_* in .env are correct.\n");
 }
 
+// The script needs the full schema (users, audit_log, rate_limits).
+$missing = array_diff(["users", "audit_log", "rate_limits"], $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN));
+if ($missing) {
+    exit("The database is missing tables: " . implode(", ", $missing) . ".\n"
+        . "Run this first (it adds them without touching existing data), then run reset_account.php again:\n"
+        . "  php database_setup.php\n");
+}
+
 echo "\nMalwareGuard account reset\n==========================\n";
 echo "  1) Admin\n  2) Super admin\n";
 $choice = ask("Which account type? (1 or 2)", "1");
