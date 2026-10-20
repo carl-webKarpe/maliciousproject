@@ -412,7 +412,9 @@ if ($view === "tokens") {
     )->fetchAll();
     $serverHost = $_SERVER["HTTP_HOST"] ?? "SERVER-IP:8000";
     $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
-    $serverUrl = $scheme . "://" . $serverHost;
+    // Includes the folder when the app lives in a subfolder (XAMPP: /maliciousproject).
+    $basePath = rtrim(str_replace("\\", "/", dirname(dirname($_SERVER["SCRIPT_NAME"] ?? "/admin/devices.php"))), "/");
+    $serverUrl = $scheme . "://" . $serverHost . $basePath;
     $isLocalOnly = str_starts_with($serverHost, "127.0.0.1") || str_starts_with($serverHost, "localhost");
     $defaultTtl = mg_setting_int("ENROLLMENT_TOKEN_TTL_HOURS", 24, 1, 168);
 

@@ -67,7 +67,7 @@ You need, on the server PC:
 | **MySQL Server 8** | Installed with MySQL Installer. MySQL Workbench is only the management tool; the **MySQL80** Windows service must be installed and running. |
 | Python 3.8+ | Only on computers that run the agent (it can be the server too). |
 
-XAMPP and Apache are **not** required.
+XAMPP and Apache are **not** required. To run it on XAMPP instead (Apache + MariaDB + phpMyAdmin), follow [XAMPP.md](XAMPP.md).
 
 Then:
 

@@ -33,10 +33,10 @@ if defined PY_FOUND (echo [OK]    Python found ^(needed only for the agent^)) el
 rem --- 3. MySQL Server service ---------------------------------------------
 for /f "usebackq delims=" %%S in (`powershell -NoProfile -Command "$s = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'MySQL*' -or $_.DisplayName -like 'MySQL*' }; if (-not $s) { 'NONE' } elseif ($s | Where-Object Status -eq 'Running') { 'RUNNING ' + (($s | Where-Object Status -eq 'Running').Name -join ',') } else { 'STOPPED ' + ($s.Name -join ',') }"`) do set "MYSQL_STATE=%%S"
 if "%MYSQL_STATE:~0,7%"=="RUNNING" echo [OK]    MySQL service running ^(%MYSQL_STATE:~8%^)
+rem A stopped MySQL80 is fine when XAMPP's MySQL/MariaDB is used instead; the
+rem database connection check below decides.
 if "%MYSQL_STATE:~0,7%"=="STOPPED" (
-    echo [FAIL]  The MySQL service ^(%MYSQL_STATE:~8%^) is installed but stopped.
-    echo         Start it: services.msc ^> %MYSQL_STATE:~8% ^> Start, or in an Administrator prompt: net start %MYSQL_STATE:~8%
-    goto :failed
+    echo [INFO]  The MySQL service ^(%MYSQL_STATE:~8%^) is stopped. Fine if you use XAMPP's MySQL; otherwise start it in services.msc.
 )
 if "%MYSQL_STATE%"=="NONE" echo [INFO]  No local MySQL service found. Continuing in case DB_HOST points to another computer.
 

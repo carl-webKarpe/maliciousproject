@@ -1,0 +1,31 @@
+# Apache rules for running MalwareGuard under XAMPP (or any Apache).
+# They do the same job as router.php does for PHP's built-in server:
+# keep configuration, secrets, dependencies and tools out of reach.
+
+Options -Indexes
+DirectoryIndex index.php index.html
+
+# Hidden files (.env, .git, .htaccess) and non-web file types.
+<FilesMatch "(^\.|\.(env|sql|md|bat|ps1|py|json|lock|log|ini|example|pm|dat|db)$)">
+    Require all denied
+</FilesMatch>
+
+# PHP files that are configuration or command-line tools, not pages.
+<FilesMatch "^(db|app_config|mail_config|database_setup|create_super_admin|rotate_admin_password|rotate_user_password|reset_account|router)\.php$">
+    Require all denied
+</FilesMatch>
+
+# Private folders, wherever the project sits under htdocs.
+RedirectMatch 404 (?i)/(vendor|database|includes|tools|runtime|agent|uploads|node_modules|\.git)(/|$)
+
+# Uploads up to 50 MB for the File Scanner and agent scans (XAMPP's default is 40 MB).
+<IfModule mod_php.c>
+    php_value upload_max_filesize 55M
+    php_value post_max_size 60M
+    php_value max_execution_time 120
+</IfModule>
+<IfModule mod_php7.c>
+    php_value upload_max_filesize 55M
+    php_value post_max_size 60M
+    php_value max_execution_time 120
+</IfModule>
