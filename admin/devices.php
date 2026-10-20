@@ -451,7 +451,7 @@ if ($view === "tokens") {
                     <br>Token: the token from step 1</li>
             </ol>
             <?php if ($isLocalOnly): ?>
-                <p class="hint" style="margin-top:12px;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> This address only works on this PC. For other computers, set <code>APP_HOST</code> in <code>.env</code> to this PC's IP address and restart the server.</p>
+                <p class="hint" style="margin-top:12px;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> This address only works on this PC. Other computers need this PC's IP instead of <code>localhost</code>, for example <code>http://10.83.54.4<?= mg_h($basePath) ?></code> (find the IP with <code>ipconfig</code>). Open the dashboard through that IP and this page shows the exact address.</p>
             <?php endif; ?>
             <p class="hint" style="margin-top:12px;"><strong>3.</strong> The computer appears under <a href="devices.php?view=computers">Computers</a> as <strong>Online</strong>.</p>
         </section>

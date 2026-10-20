@@ -1,5 +1,9 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+
+rem Server address offered by default (press Enter to accept it).
+rem XAMPP/Apache: http://IP/MaliciousProject   Built-in server: http://IP:8000
+set "DEFAULT_SERVER=http://10.83.54.4/MaliciousProject"
 title Install MalwareGuard agent
 cd /d "%~dp0"
 
@@ -62,7 +66,9 @@ if /i "%ENROLL%"=="Y" (
     echo Ask your administrator for the server address and a one-time enrollment token
     echo ^(dashboard: Devices ^> Enrollment tokens ^> Generate token^).
     echo.
-    set /p "SERVER=Server address, e.g. http://192.168.1.10:8000 : "
+    set "SERVER="
+    set /p "SERVER=Server address [!DEFAULT_SERVER!] : "
+    if "!SERVER!"=="" set "SERVER=!DEFAULT_SERVER!"
     set /p "TOKEN=Enrollment token : "
     set /p "NAME=Name for this computer [%COMPUTERNAME%] : "
     if "!NAME!"=="" set "NAME=%COMPUTERNAME%"
