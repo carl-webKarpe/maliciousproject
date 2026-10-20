@@ -9,7 +9,7 @@ $path = "/" . ltrim(str_replace("\\", "/", $path), "/");
 $deniedPrefixes = ["/.", "/vendor/", "/database/", "/includes/", "/runtime/", "/tools/", "/agent/", "/uploads/", "/node_modules/"];
 $deniedFiles = [
     "/db.php", "/app_config.php", "/mail_config.php", "/database_setup.php", "/create_super_admin.php",
-    "/rotate_admin_password.php", "/rotate_user_password.php", "/router.php", "/composer.json", "/composer.lock",
+    "/rotate_admin_password.php", "/rotate_user_password.php", "/reset_account.php", "/router.php", "/composer.json", "/composer.lock",
 ];
 
 $isDenied = in_array(strtolower($path), $deniedFiles, true)
