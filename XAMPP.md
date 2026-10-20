@@ -89,6 +89,16 @@ DB_PASS=
 
 **Option B: start with an empty database**
 
+Easiest in phpMyAdmin: open <http://localhost/phpmyadmin> → **Import** → choose
+`database\malwareguard_xampp.sql` from the project → **Import**. That one file creates the
+`malwareguard` database with every table. Then create your admin:
+
+```bat
+C:\xampp\php\php.exe reset_account.php
+```
+
+Or do the same from the command line:
+
 ```bat
 cd C:\xampp\htdocs\maliciousproject
 C:\xampp\php\php.exe database_setup.php
