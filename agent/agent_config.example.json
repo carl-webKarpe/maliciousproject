@@ -3,7 +3,7 @@
   "device_name": "",
   "device_id": "",
   "enrollment_token": "",
-  "watch_directories": ["{DOWNLOADS}"],
+  "watch_directories": ["{DOWNLOADS}", "{DESKTOP}", "{DOCUMENTS}", "{PICTURES}", "{VIDEOS}", "{MUSIC}"],
   "recursive": false,
   "heartbeat_interval": 30,
   "send_interval": 5,

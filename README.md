@@ -8,7 +8,7 @@ MalwareGuard monitors **authorized** Windows PCs and laptops for new and changed
 
 **New here? Follow [SETUP.md](SETUP.md)** for a step-by-step installation and start-up guide.
 
-> Install the agent only on computers you own or are authorized to monitor, and tell the people who use them. The agent watches only the folders listed in its configuration (by default the user's Downloads folder). It does not collect passwords, browser history, messages or keystrokes, and it never runs, deletes or moves files.
+> Install the agent only on computers you own or are authorized to monitor, and tell the people who use them. The agent watches only the folders listed in its configuration (by default the user's Downloads, Desktop, Documents, Pictures, Videos and Music folders). It does not collect passwords, browser history, messages or keystrokes, and it never runs, deletes or moves files.
 
 ---
 
@@ -184,7 +184,7 @@ Make sure the network is set to **Private** (Settings → Network & Internet →
 | `server_url` | Server address including the port, e.g. `http://192.168.1.10:8000` |
 | `device_id` | Filled in automatically at enrollment |
 | `enrollment_token` | Leave empty; the installer passes it once and it is never stored |
-| `watch_directories` | **Approved folders.** `{DOWNLOADS}` = the user's Downloads folder (honours folder redirection). Add only folders an administrator approved, e.g. `"C:\\LabSamples"` |
+| `watch_directories` | **Approved folders.** Placeholders resolve to the real Windows folders (honouring redirection / cloud sync): `{DOWNLOADS}`, `{DESKTOP}`, `{DOCUMENTS}`, `{PICTURES}`, `{VIDEOS}`, `{MUSIC}`. Add only folders an administrator approved, e.g. `"C:\\LabSamples"` |
 | `recursive` | `true` also watches subfolders |
 | `heartbeat_interval` | Seconds between heartbeats (the server's `AGENT_HEARTBEAT_SECONDS` is used at enrollment) |
 | `settle_seconds` | How long a file must stop changing before it is hashed and reported |
@@ -217,7 +217,8 @@ Restart the agent after editing (`STOP_AGENT.bat`, then `START_AGENT.bat`).
 | New file in a monitored folder | `created`, marked *potential download* |
 | Browser download (`file.pdf.crdownload` / `.part` renamed to `file.pdf`) | one `created` event for `file.pdf`, *potential download*, with the temporary name as `previous_path` |
 | File content changed | `modified` |
-| File renamed or moved within monitored folders | `moved`, with `previous_path` |
+| File renamed in the same folder | `renamed`, with `previous_path` |
+| File moved to another monitored folder | `moved`, with `previous_path` |
 | File deleted | `deleted` (no hash, since the file is gone) |
 
 "Potential download" means only that a new file appeared in a watched folder; it is not proof that a browser downloaded it. Temporary files (`.crdownload`, `.part`, `.tmp`, `~$…`) are ignored, a file is reported only after it stops changing and can be opened, and repeated notifications for the same file state collapse into one event.

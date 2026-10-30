@@ -18,7 +18,7 @@ require_once __DIR__ . "/../includes/scan_engine.php";
 header("Content-Type: application/json");
 header("Cache-Control: no-store");
 
-const EVENT_TYPES = ["created", "modified", "moved", "deleted"];
+const EVENT_TYPES = ["created", "modified", "renamed", "moved", "deleted"];
 const MAX_EVENTS_PER_BATCH = 200;
 
 function respond(int $status, array $payload): never
@@ -300,9 +300,9 @@ if ($action === "events") {
 
     $insert = $pdo->prepare(
         "INSERT IGNORE INTO file_events
-            (device_id, event_uid, event_type, file_path, previous_path, file_name, file_size, sha256, hash_note,
-             is_potential_download, occurred_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            (device_id, event_uid, event_type, file_path, previous_path, file_name, file_size, sha256, user_account,
+             hash_note, is_potential_download, occurred_at, detected_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     $autoScan = mg_setting_bool("AUTO_SCAN_NEW_FILES");
     $maxUpload = mg_setting_int("AGENT_MAX_UPLOAD_MB", 50, 1, 500) * 1024 * 1024;
@@ -329,6 +329,7 @@ if ($action === "events") {
         $fileName = clean_text(basename(str_replace("\\", "/", $path)), 255);
         $isDownload = !empty($event["is_potential_download"]) ? 1 : 0;
         $previous = clean_text($event["previous_path"] ?? "", 1024);
+        $userAccount = clean_text($event["user_account"] ?? "", 255);
         $insert->execute([
             $deviceId,
             $uid,
@@ -338,9 +339,11 @@ if ($action === "events") {
             $fileName !== "" ? $fileName : $path,
             $size === false ? null : $size,
             $sha256 === "" ? null : $sha256,
+            $userAccount === "" ? null : $userAccount,
             ($note = clean_text($event["hash_note"] ?? "", 255)) === "" ? null : $note,
             $isDownload,
             mg_epoch_to_db($event["occurred_at"] ?? null),
+            isset($event["detected_at"]) ? mg_epoch_to_db($event["detected_at"]) : null,
         ]);
         $accepted[] = $uid;
 

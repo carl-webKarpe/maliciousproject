@@ -53,7 +53,7 @@ DEFAULTS: Dict[str, Any] = {
     "device_name": "",
     "device_id": "",
     "enrollment_token": "",
-    "watch_directories": ["{DOWNLOADS}"],
+    "watch_directories": ["{DOWNLOADS}", "{DESKTOP}", "{DOCUMENTS}", "{PICTURES}", "{VIDEOS}", "{MUSIC}"],
     "recursive": False,
     "heartbeat_interval": 30,
     "send_interval": 5,
@@ -115,34 +115,79 @@ class Config:
         return configured if configured.is_absolute() else self.data_dir / configured
 
     def watch_directories(self) -> List[Path]:
-        result = []
+        # Resolve {DOWNLOADS}, {DESKTOP}, ... to their real locations, de-duplicate
+        # (e.g. a cloud tool may point two names at one folder), and drop a folder
+        # that is nested inside another watched one so it is not watched twice.
+        resolved: List[Path] = []
         for entry in self["watch_directories"] or []:
-            text = str(entry).replace("{DOWNLOADS}", str(downloads_folder()))
-            result.append(Path(os.path.expandvars(os.path.expanduser(text))))
-        return result
+            text = str(entry)
+            for name, path in known_folders().items():
+                text = text.replace("{" + name + "}", str(path))
+            resolved.append(Path(os.path.expandvars(os.path.expanduser(text))))
+
+        recursive = bool(self["recursive"])
+        unique: List[Path] = []
+        seen: set = set()
+        for path in resolved:
+            key = os.path.normcase(os.path.normpath(str(path)))
+            if key in seen:
+                continue
+            # With recursive watches, a folder already covered by a parent watch
+            # would double-report; skip it.
+            if recursive and any(key.startswith(k + os.sep) for k in seen):
+                continue
+            seen.add(key)
+            unique.append(path)
+        return unique
+
+
+# Windows Known Folder IDs. Resolved at runtime so redirected or cloud-synced
+# folders (OneDrive, etc.) are found at their real location, not a fixed path.
+_KNOWN_FOLDER_IDS = {
+    "DOWNLOADS": ("374DE290-123F-4565-9164-39C4925E467B", "Downloads"),
+    "DESKTOP": ("B4BFCC3A-DB2C-424C-B029-7FE99A87C641", "Desktop"),
+    "DOCUMENTS": ("FDD39AD0-238F-46AF-ADB4-6C85480369C7", "Documents"),
+    "PICTURES": ("33E28130-4E1E-4676-835A-98395C3BC3BB", "Pictures"),
+    "VIDEOS": ("18989B1D-99B5-455B-841C-AB7C74E4DDFC", "Videos"),
+    "MUSIC": ("4BD8D571-6D19-48D3-BE97-422220080E43", "Music"),
+}
+
+
+def _known_folder_path(guid_str: str) -> Optional[str]:
+    if os.name != "nt":
+        return None
+    try:
+        from ctypes import wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
+                        ("Data3", wintypes.WORD), ("Data4", wintypes.BYTE * 8)]
+
+        guid = GUID.from_buffer_copy(uuid.UUID(guid_str).bytes_le)
+        path_ptr = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(path_ptr)) == 0:
+            try:
+                return path_ptr.value
+            finally:
+                ctypes.windll.ole32.CoTaskMemFree(path_ptr)
+    except (OSError, AttributeError, ValueError):
+        pass
+    return None
+
+
+def known_folders() -> Dict[str, Path]:
+    """Map each placeholder name to the user's real folder for it."""
+    home = Path.home()
+    result: Dict[str, Path] = {}
+    for name, (guid_str, fallback) in _KNOWN_FOLDER_IDS.items():
+        resolved = _known_folder_path(guid_str)
+        result[name] = Path(resolved) if resolved else home / fallback
+    return result
 
 
 def downloads_folder() -> Path:
     """The user's Downloads folder, honouring Windows folder redirection."""
-    if os.name == "nt":
-        try:
-            from ctypes import wintypes
-
-            class GUID(ctypes.Structure):
-                _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
-                            ("Data3", wintypes.WORD), ("Data4", wintypes.BYTE * 8)]
-
-            folder_id = uuid.UUID("374DE290-123F-4565-9164-39C4925E467B")  # FOLDERID_Downloads
-            guid = GUID.from_buffer_copy(folder_id.bytes_le)
-            path_ptr = ctypes.c_wchar_p()
-            if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(path_ptr)) == 0:
-                try:
-                    return Path(path_ptr.value)
-                finally:
-                    ctypes.windll.ole32.CoTaskMemFree(path_ptr)
-        except (OSError, AttributeError, ValueError):
-            pass
-    return Path.home() / "Downloads"
+    return known_folders()["DOWNLOADS"]
 
 
 class CredentialStore:
@@ -441,7 +486,9 @@ class FileMonitor:
                     # A browser finished a download and renamed it.
                     self._touch(dest, "created", src, True, replace=True)
                 else:
-                    self._touch(dest, "moved", src, False, replace=True)
+                    # Same folder, name changed = rename; different folder = move.
+                    same_folder = os.path.normcase(os.path.dirname(src)) == os.path.normcase(os.path.dirname(dest))
+                    self._touch(dest, "renamed" if same_folder else "moved", src, False, replace=True)
             elif kind == "deleted":
                 with self.lock:
                     pending = self.pending.pop(src, None)
@@ -553,6 +600,10 @@ class Agent:
         self.active_jobs: set = set()
         self.monitor = FileMonitor(self)
         self.last_error = ""
+        try:
+            self.username = getpass.getuser()
+        except Exception:
+            self.username = ""
         self.backoff = 0.0
         self.auth_blocked = False
         self.max_upload = 50 * 1024 * 1024
@@ -596,8 +647,13 @@ class Agent:
             "size": size,
             "sha256": digest,
             "hash_note": note,
+            "user_account": self.username,
             "is_potential_download": bool(is_download),
+            # These events are observed in real time, so the moment the agent
+            # receives the notification is both the detection time and the best
+            # available event time. (Offline reconciliation would set them apart.)
             "occurred_at": int(occurred),
+            "detected_at": int(occurred),
         }
         if self.queue.put(event):
             log.info("%s %s%s", event_type.upper(), path, f" (sha256 {digest[:12]}...)" if digest else "")

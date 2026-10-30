@@ -545,7 +545,7 @@ if ($view === "events") {
         $where[] = "e.device_id = ?";
         $params[] = $filterDevice;
     }
-    if (in_array($filterType, ["created", "modified", "moved", "deleted"], true)) {
+    if (in_array($filterType, ["created", "modified", "renamed", "moved", "deleted"], true)) {
         $where[] = "e.event_type = ?";
         $params[] = $filterType;
     }
@@ -576,7 +576,7 @@ if ($view === "events") {
     $hasNextPage = count($events) > $perPage;
     $events = array_slice($events, 0, $perPage);
     $deviceOptions = $pdo->query("SELECT device_id, display_name, hostname FROM endpoint_devices ORDER BY display_name")->fetchAll();
-    $eventIcons = ["created" => "fa-file-circle-plus", "modified" => "fa-file-pen", "moved" => "fa-file-export", "deleted" => "fa-file-circle-xmark"];
+    $eventIcons = ["created" => "fa-file-circle-plus", "modified" => "fa-file-pen", "renamed" => "fa-i-cursor", "moved" => "fa-file-export", "deleted" => "fa-file-circle-xmark"];
 
     mg_admin_page_start($admin, "events", "File events",
         "Files that appeared, changed, moved or were deleted in the watched folders (usually Downloads). Click <strong>Scan</strong> to check a file; the computer sends it to this server and only its hash goes to VirusTotal.");
@@ -597,7 +597,7 @@ if ($view === "events") {
             <div><label for="f-type">What happened</label>
                 <select id="f-type" name="type">
                     <option value="">Anything</option>
-                    <?php foreach (["created" => "New file", "modified" => "Changed", "moved" => "Renamed / moved", "deleted" => "Deleted"] as $type => $label): ?>
+                    <?php foreach (["created" => "New file", "modified" => "Changed", "renamed" => "Renamed", "moved" => "Moved", "deleted" => "Deleted"] as $type => $label): ?>
                         <option value="<?= $type ?>"<?= $filterType === $type ? " selected" : "" ?>><?= $label ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -621,16 +621,24 @@ if ($view === "events") {
                 <tbody>
                 <?php foreach ($events as $event): ?>
                     <tr>
-                        <td><?= mg_h($event["occurred_at"]) ?></td>
+                        <td title="Detected: <?= mg_h($event["detected_at"] ?: $event["occurred_at"]) ?>&#10;Received by server: <?= mg_h($event["received_at"]) ?>"><?= mg_h($event["occurred_at"]) ?></td>
                         <td>
-                            <strong><?= mg_h($event["file_name"]) ?></strong><br>
+                            <?php $previousName = $event["previous_path"] ? basename(str_replace("\\", "/", $event["previous_path"])) : ""; ?>
+                            <?php if ($previousName !== "" && in_array($event["event_type"], ["renamed", "moved"], true)): ?>
+                                <strong><?= mg_h($previousName) ?> &rarr; <?= mg_h($event["file_name"]) ?></strong><br>
+                            <?php else: ?>
+                                <strong><?= mg_h($event["file_name"]) ?></strong><br>
+                            <?php endif; ?>
                             <small title="<?= mg_h($event["sha256"] ?? "") ?>"><?= mg_h($event["file_path"]) ?></small>
-                            <?php if ($event["previous_path"]): ?><br><small>was <?= mg_h(basename(str_replace("\\", "/", $event["previous_path"]))) ?></small><?php endif; ?>
+                            <?php if ($event["previous_path"] && $event["event_type"] === "moved"): ?><br><small>from <?= mg_h($event["previous_path"]) ?></small><?php endif; ?>
                         </td>
-                        <td><?= mg_h(($event["display_name"] ?: $event["hostname"]) ?: $event["device_id"]) ?></td>
+                        <td>
+                            <?= mg_h(($event["display_name"] ?: $event["hostname"]) ?: $event["device_id"]) ?>
+                            <?php if (!empty($event["user_account"])): ?><br><small><i class="fa-solid fa-user" aria-hidden="true"></i> <?= mg_h($event["user_account"]) ?></small><?php endif; ?>
+                        </td>
                         <td>
                             <i class="fa-solid <?= $eventIcons[$event["event_type"]] ?? "fa-file" ?>" aria-hidden="true"></i>
-                            <?= mg_h(["created" => "New file", "modified" => "Changed", "moved" => "Renamed", "deleted" => "Deleted"][$event["event_type"]] ?? $event["event_type"]) ?>
+                            <?= mg_h(["created" => "New file", "modified" => "Changed", "renamed" => "Renamed", "moved" => "Moved", "deleted" => "Deleted"][$event["event_type"]] ?? $event["event_type"]) ?>
                             <?php if ($event["is_potential_download"]): ?><br><small>Download</small><?php endif; ?>
                         </td>
                         <td><?= mg_h(mg_format_bytes($event["file_size"] === null ? null : (int) $event["file_size"])) ?></td>
