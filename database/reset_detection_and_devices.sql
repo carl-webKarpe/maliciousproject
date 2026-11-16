@@ -283,21 +283,35 @@ CREATE TABLE IF NOT EXISTS `vt_cache` (
 INSERT IGNORE INTO `schema_migrations` (`version`) VALUES ('001_device_monitoring'), ('002_search_activity'), ('003_file_event_details');
 
 -- ---------------------------------------------------------------------------
--- 2. Reset detection data and devices (counters restart at 1)
+-- 2. Reset detection data and devices
+--    DELETE in child-to-parent order (not TRUNCATE), so it works on XAMPP's
+--    MariaDB even when phpMyAdmin keeps foreign key checks on.
 -- ---------------------------------------------------------------------------
 
-TRUNCATE TABLE `file_events`;
-TRUNCATE TABLE `search_events`;
-TRUNCATE TABLE `detection_results`;
-TRUNCATE TABLE `scans`;
-TRUNCATE TABLE `scan_requests`;
-TRUNCATE TABLE `vt_cache`;
-TRUNCATE TABLE `endpoint_alerts`;
-TRUNCATE TABLE `endpoint_sessions`;
-TRUNCATE TABLE `endpoint_processes`;
-TRUNCATE TABLE `endpoint_devices`;
-TRUNCATE TABLE `enrollment_tokens`;
-TRUNCATE TABLE `rate_limits`;
+DELETE FROM `scan_requests`;
+DELETE FROM `file_events`;
+DELETE FROM `search_events`;
+DELETE FROM `detection_results`;
+DELETE FROM `scans`;
+DELETE FROM `vt_cache`;
+DELETE FROM `endpoint_alerts`;
+DELETE FROM `endpoint_sessions`;
+DELETE FROM `endpoint_processes`;
+DELETE FROM `endpoint_devices`;
+DELETE FROM `enrollment_tokens`;
+DELETE FROM `rate_limits`;
+
+-- Restart the ID counters at 1.
+ALTER TABLE `scan_requests` AUTO_INCREMENT = 1;
+ALTER TABLE `file_events` AUTO_INCREMENT = 1;
+ALTER TABLE `search_events` AUTO_INCREMENT = 1;
+ALTER TABLE `detection_results` AUTO_INCREMENT = 1;
+ALTER TABLE `scans` AUTO_INCREMENT = 1;
+ALTER TABLE `endpoint_alerts` AUTO_INCREMENT = 1;
+ALTER TABLE `endpoint_sessions` AUTO_INCREMENT = 1;
+ALTER TABLE `endpoint_processes` AUTO_INCREMENT = 1;
+ALTER TABLE `endpoint_devices` AUTO_INCREMENT = 1;
+ALTER TABLE `enrollment_tokens` AUTO_INCREMENT = 1;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
