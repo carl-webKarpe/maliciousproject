@@ -8,7 +8,7 @@ MalwareGuard monitors **authorized** Windows PCs and laptops for new and changed
 
 **New here? Follow [SETUP.md](SETUP.md)** for a step-by-step installation and start-up guide.
 
-> Install the agent only on computers you own or are authorized to monitor, and tell the people who use them. The agent watches only the folders listed in its configuration (by default the user's Downloads folder). It does not collect passwords, browser history, messages or keystrokes, and it never runs, deletes or moves files.
+> Install the agent only on computers you own or are authorized to monitor, and tell the people who use them. The agent recursively watches only the folders listed in its configuration (by default the user's Downloads and Desktop folders), including nested folders and folder creation or rename/move events. Search-term collection is separately disabled by default and requires the device user's opt-in. When enabled, it extracts recognized search terms from Chrome/Edge history and Windows Search; it does not collect passwords, page contents, messages or keystrokes, and it never runs, deletes or moves files.
 
 ---
 
@@ -184,7 +184,10 @@ Make sure the network is set to **Private** (Settings → Network & Internet →
 | `server_url` | Server address including the port, e.g. `http://192.168.1.10:8000` |
 | `device_id` | Filled in automatically at enrollment |
 | `enrollment_token` | Leave empty; the installer passes it once and it is never stored |
-| `watch_directories` | **Approved folders.** `{DOWNLOADS}` = the user's Downloads folder (honours folder redirection). Add only folders an administrator approved, e.g. `"C:\\LabSamples"` |
+| `watch_directories` | **Approved folders.** `{DOWNLOADS}` = the user's Downloads folder and `{DESKTOP}` = their Desktop folder (both honour Windows folder redirection). Add only folders an administrator approved, e.g. `"C:\\LabSamples"` |
+| `search_monitor` | Defaults to `false`. Search collection is opt-in; use `agent.py search-consent --enable` only after the device user agrees. `--disable` stops collection and removes queued search terms. Existing browser/history terms are baselined and are not uploaded on first startup. |
+| `search_sources` | Sources to check: `Google Chrome`, `Microsoft Edge`, and `Windows Search`. |
+| `search_interval` | Seconds between checks for new search activity (default 60). |
 | `recursive` | `true` also watches subfolders |
 | `heartbeat_interval` | Seconds between heartbeats (the server's `AGENT_HEARTBEAT_SECONDS` is used at enrollment) |
 | `settle_seconds` | How long a file must stop changing before it is hashed and reported |

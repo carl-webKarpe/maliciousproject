@@ -161,7 +161,7 @@ if ($view === "home") {
 
     $steps = [
         [$devices["total"] > 0, "Add a computer", "Generate a token and run the agent installer on a PC.", "devices.php?view=tokens", "Add a computer"],
-        [(int) $counts["all_events"] > 0, "See a download", "Download any file on that PC; it appears under File events.", "devices.php?view=events", "Open file events"],
+        [(int) $counts["all_events"] > 0, "See file activity", "Create or change a file in Downloads or on Desktop; it appears under File events.", "devices.php?view=events", "Open file events"],
         [(int) $counts["scans"] > 0, "Scan a file", "Click Scan next to a file event, or upload a file here.", "dashboard.php?view=scanner", "Scan a file"],
     ];
     $allDone = !in_array(false, array_column($steps, 0), true);
@@ -397,7 +397,7 @@ if (in_array($view, ["history", "threats", "quarantine"], true)) {
     <section class="panel">
         <form method="get" action="dashboard.php" class="form-row toolbar">
             <input type="hidden" name="view" value="<?= mg_h($view) ?>">
-            <div><label for="q">Search file name or hash</label><input id="q" name="q" type="search" value="<?= mg_h($query) ?>" placeholder="report.pdf"></div>
+            <div><label for="q">Search file name or hash</label><input id="q" name="q" type="search" value="<?= mg_h($query) ?>" placeholder="Enter file name or hash" autocomplete="off"></div>
             <div><label for="risk">Risk</label>
                 <select id="risk" name="risk">
                     <option value="">All levels</option>

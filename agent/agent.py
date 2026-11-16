@@ -6,15 +6,17 @@ laptop, reports file creation, modification, renaming and deletion to the
 MalwareGuard server, and carries out scans the server's administrators
 request for files in those directories.
 
-What it does NOT do: execute, delete or move files; read files outside the
-approved directories; collect passwords, browser history, messages or
-keystrokes; accept arbitrary commands from the server.
+It never executes, deletes or moves files, reads files outside approved
+directories, collects passwords, page contents, messages or keystrokes, or
+accepts arbitrary commands from the server. Search terms are collected from
+Chrome, Edge and Windows Search only when the device user opts in.
 
 Commands
     python agent.py enroll --server http://192.168.1.10:8000 --token TOKEN
     python agent.py run
     python agent.py check
     python agent.py status
+    python agent.py search-consent --enable|--disable
 """
 
 from __future__ import annotations
@@ -34,11 +36,13 @@ import socket
 import sqlite3
 import sys
 import threading
+import shutil
+import tempfile
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 AGENT_VERSION = "1.0.0"
 AGENT_DIR = Path(__file__).resolve().parent
@@ -53,12 +57,15 @@ DEFAULTS: Dict[str, Any] = {
     "device_name": "",
     "device_id": "",
     "enrollment_token": "",
-    "watch_directories": ["{DOWNLOADS}"],
-    "recursive": False,
+    "watch_directories": ["{DOWNLOADS}", "{DESKTOP}"],
+    "recursive": True,
     "heartbeat_interval": 30,
     "send_interval": 5,
     "settle_seconds": 3,
     "max_hash_mb": 200,
+    "search_monitor": False,
+    "search_interval": 60,
+    "search_sources": ["Microsoft Edge", "Google Chrome", "Windows Search"],
     "log_directory": "logs",
     "ca_bundle": "",
     "allow_http_on_public_networks": False,
@@ -87,6 +94,10 @@ class Config:
             if not isinstance(loaded, dict):
                 raise AgentError(f"Configuration {path} must contain a JSON object.")
             self.data.update(loaded)
+            if loaded.get("watch_directories") == ["{DOWNLOADS}"]:
+                self.data["watch_directories"] = ["{DOWNLOADS}", "{DESKTOP}"]
+            if loaded.get("recursive") is False:
+                self.data["recursive"] = True
 
     @property
     def data_dir(self) -> Path:
@@ -116,14 +127,20 @@ class Config:
 
     def watch_directories(self) -> List[Path]:
         result = []
+        replacements = {
+            "{DOWNLOADS}": str(downloads_folder()),
+            "{DESKTOP}": str(desktop_folder()),
+        }
         for entry in self["watch_directories"] or []:
-            text = str(entry).replace("{DOWNLOADS}", str(downloads_folder()))
+            text = str(entry)
+            for placeholder, folder in replacements.items():
+                text = text.replace(placeholder, folder)
             result.append(Path(os.path.expandvars(os.path.expanduser(text))))
         return result
 
 
-def downloads_folder() -> Path:
-    """The user's Downloads folder, honouring Windows folder redirection."""
+def known_folder(folder_id: str, fallback_name: str) -> Path:
+    """Resolve a redirected Windows known folder, with a portable fallback."""
     if os.name == "nt":
         try:
             from ctypes import wintypes
@@ -132,8 +149,7 @@ def downloads_folder() -> Path:
                 _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
                             ("Data3", wintypes.WORD), ("Data4", wintypes.BYTE * 8)]
 
-            folder_id = uuid.UUID("374DE290-123F-4565-9164-39C4925E467B")  # FOLDERID_Downloads
-            guid = GUID.from_buffer_copy(folder_id.bytes_le)
+            guid = GUID.from_buffer_copy(uuid.UUID(folder_id).bytes_le)
             path_ptr = ctypes.c_wchar_p()
             if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(path_ptr)) == 0:
                 try:
@@ -142,7 +158,17 @@ def downloads_folder() -> Path:
                     ctypes.windll.ole32.CoTaskMemFree(path_ptr)
         except (OSError, AttributeError, ValueError):
             pass
-    return Path.home() / "Downloads"
+    return Path.home() / fallback_name
+
+
+def downloads_folder() -> Path:
+    """The user's redirected Downloads folder."""
+    return known_folder("374DE290-123F-4565-9164-39C4925E467B", "Downloads")
+
+
+def desktop_folder() -> Path:
+    """The user's redirected Desktop folder."""
+    return known_folder("B4BFCC3A-DB2C-424C-B029-7FE99A87C641", "Desktop")
 
 
 class CredentialStore:
@@ -235,6 +261,12 @@ class EventQueue:
         if not uids:
             return
         with self._lock:
+            self._db.executemany("DELETE FROM outbox WHERE event_uid = ?", [(uid,) for uid in uids])
+
+    def remove_search_events(self) -> None:
+        with self._lock:
+            rows = self._db.execute("SELECT event_uid, payload FROM outbox").fetchall()
+            uids = [uid for uid, payload in rows if "term" in json.loads(payload)]
             self._db.executemany("DELETE FROM outbox WHERE event_uid = ?", [(uid,) for uid in uids])
 
     def depth(self) -> int:
@@ -415,12 +447,22 @@ class FileMonitor:
     # watchdog callback -----------------------------------------------------
     def dispatch(self, event: Any) -> None:
         try:
-            if getattr(event, "is_directory", False):
-                return
             kind = event.event_type
+            is_directory = getattr(event, "is_directory", False)
             src = os.path.abspath(event.src_path)
             if self.agent.is_own_file(src):
                 return
+
+            if is_directory:
+                if kind == "created":
+                    self.agent.record_event("created", src, None, None, None, "folder", False)
+                elif kind == "moved":
+                    dest = os.path.abspath(event.dest_path)
+                    self.agent.record_event("moved", dest, src, None, None, "folder", False)
+                elif kind == "deleted":
+                    self.agent.record_event("deleted", src, None, None, None, "folder", False)
+                return
+
             if kind == "created":
                 self._touch(src, "created", None, True)
             elif kind == "modified":
@@ -533,6 +575,143 @@ def can_open(path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Authorized browser and Windows Search monitoring
+# ---------------------------------------------------------------------------
+
+SEARCH_ENGINE_KEYS = {
+    "google": "q",
+    "bing": "q",
+    "duckduckgo": "q",
+    "yahoo": "p",
+    "yandex": "text",
+    "brave": "q",
+    "ecosia": "q",
+}
+
+
+def search_term_from_url(url: str) -> Optional[str]:
+    parsed = urlparse(url)
+    host = parsed.hostname.lower() if parsed.hostname else ""
+    engine = next((name for name in SEARCH_ENGINE_KEYS if name in host), None)
+    if not engine:
+        return None
+    values = parse_qs(parsed.query).get(SEARCH_ENGINE_KEYS[engine], [])
+    term = values[0].strip() if values else ""
+    return term[:500] if term else None
+
+
+class SearchMonitor:
+    def __init__(self, agent: "Agent"):
+        self.agent = agent
+        self.state_path = agent.data_dir / "search_state.json"
+        self.initializing = not self.state_path.exists()
+        try:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+            self.seen = set(data if isinstance(data, list) else data.get("seen", []))
+        except (OSError, ValueError):
+            self.seen = set()
+
+    def save_state(self) -> None:
+        self.state_path.write_text(json.dumps(sorted(list(self.seen)[-5000:]), ensure_ascii=False), encoding="utf-8")
+
+    def record(self, term: str, source: str, occurred_at: int, query_url: str = "") -> None:
+        fingerprint = hashlib.sha256(f"{source}|{term}|{occurred_at}|{query_url}".encode("utf-8")).hexdigest()
+        if fingerprint in self.seen:
+            return
+        self.seen.add(fingerprint)
+        if self.initializing:
+            return
+        event = {
+            "event_uid": fingerprint,
+            "source": source,
+            "term": term,
+            "query_url": query_url,
+            "occurred_at": occurred_at,
+        }
+        self.agent.queue.put(event)
+
+    def chromium_profiles(self, browser: str) -> List[Tuple[str, Path]]:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            return []
+        roots = {
+            "Google Chrome": Path(local) / "Google" / "Chrome" / "User Data",
+            "Microsoft Edge": Path(local) / "Microsoft" / "Edge" / "User Data",
+        }
+        root = roots[browser]
+        if not root.is_dir():
+            return []
+        profiles = [root / "Default"]
+        profiles += sorted(root.glob("Profile *"))
+        return [(profile.name, profile / "History") for profile in profiles if (profile / "History").is_file()]
+
+    def scan_browser(self, browser: str) -> None:
+        for profile, history in self.chromium_profiles(browser):
+            copied = None
+            try:
+                fd, name = tempfile.mkstemp(prefix="malwareguard-history-", suffix=".sqlite")
+                os.close(fd)
+                copied = Path(name)
+                shutil.copy2(history, copied)
+                db = sqlite3.connect(f"file:{copied}?mode=ro", uri=True)
+                rows = db.execute(
+                    "SELECT u.url, u.title, v.visit_time FROM visits v "
+                    "JOIN urls u ON u.id=v.url "
+                    "ORDER BY v.visit_time DESC LIMIT 250"
+                ).fetchall()
+                db.close()
+                for url, title, visit_time in rows:
+                    term = search_term_from_url(str(url))
+                    if term:
+                        epoch = int((int(visit_time) / 1000000) - 11644473600)
+                        # Ignore clearly pre-existing history when the monitor first starts.
+                        if epoch >= int(time.time()) - 2 * 24 * 60 * 60:
+                            self.record(term, browser, epoch)
+            except (OSError, sqlite3.Error):
+                log.exception("Could not inspect %s %s history", browser, profile)
+            finally:
+                if copied:
+                    copied.unlink(missing_ok=True)
+
+    def scan_windows_search(self) -> None:
+        if os.name != "nt":
+            return
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                 r"Software\Microsoft\Windows\CurrentVersion\Explorer\WordWheelQuery")
+            try:
+                count = winreg.QueryInfoKey(key)[1]
+                for index in range(count):
+                    name, value, _ = winreg.EnumValue(key, index)
+                    if not name.isdigit():
+                        continue
+                    if isinstance(value, str):
+                        term = value.strip().rstrip("\x00")
+                    elif isinstance(value, bytes):
+                        term = value.decode("utf-16le", errors="ignore").strip().rstrip("\x00")
+                    else:
+                        continue
+                    if term:
+                        self.record(term, "Windows Search", 0, name)
+            finally:
+                winreg.CloseKey(key)
+        except OSError:
+            return
+
+    def scan_once(self) -> None:
+        sources = {str(item) for item in (self.agent.config["search_sources"] or [])}
+        if "Google Chrome" in sources:
+            self.scan_browser("Google Chrome")
+        if "Microsoft Edge" in sources:
+            self.scan_browser("Microsoft Edge")
+        if "Windows Search" in sources:
+            self.scan_windows_search()
+        self.save_state()
+        self.initializing = False
+
+
+# ---------------------------------------------------------------------------
 # Agent runtime
 # ---------------------------------------------------------------------------
 
@@ -546,6 +725,7 @@ class Agent:
         self.jobs: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self.active_jobs: set = set()
         self.monitor = FileMonitor(self)
+        self.search_monitor = SearchMonitor(self)
         self.last_error = ""
         self.backoff = 0.0
         self.auth_blocked = False
@@ -570,7 +750,7 @@ class Agent:
         if os.path.dirname(candidate) + os.sep != data_root:
             return False
         name = os.path.basename(candidate)
-        return name.startswith(("queue.db", "credential.", "agent.pid", "stop.request")) or \
+        return name.startswith(("queue.db", "credential.", "agent.pid", "stop.request", "search_state.json")) or \
             name.startswith(os.path.normcase(self.config.path.stem))
 
     def record_event(self, event_type: str, path: str, previous: Optional[str], size: Optional[int],
@@ -661,12 +841,21 @@ class Agent:
                 if batch:
                     try:
                         assert self.api is not None
-                        response = self.api.post("events", {"events": batch}, timeout=30)
-                        rejected = response.get("rejected", [])
+                        file_events = [item for item in batch if "event_type" in item]
+                        search_events = [item for item in batch if "term" in item]
+                        accepted = []
+                        rejected = []
+                        if file_events:
+                            response = self.api.post("events", {"events": file_events}, timeout=30)
+                            accepted.extend(response.get("accepted", []))
+                            rejected.extend(response.get("rejected", []))
+                        if search_events:
+                            response = self.api.post("search_events", {"events": search_events}, timeout=30)
+                            accepted.extend(response.get("accepted", []))
+                            rejected.extend(response.get("rejected", []))
                         for item in rejected:
                             log.warning("Server rejected event %s: %s", item.get("event_uid"), item.get("reason"))
-                        self.queue.remove(list(response.get("accepted", [])) +
-                                          [str(item.get("event_uid")) for item in rejected])
+                        self.queue.remove(list(accepted) + [str(item.get("event_uid")) for item in rejected])
                         self.backoff = 0
                         if len(batch) == 100:
                             wait = 0.2  # more queued; keep draining
@@ -685,6 +874,15 @@ class Agent:
         while not self.stop_event.is_set():
             self.monitor.settle_once()
             self.stop_event.wait(1.0)
+
+    def search_loop(self) -> None:
+        while not self.stop_event.is_set():
+            if bool(self.config["search_monitor"]):
+                try:
+                    self.search_monitor.scan_once()
+                except Exception:
+                    log.exception("Search monitoring failed")
+            self.stop_event.wait(max(15, int(self.config["search_interval"])))
 
     def job_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -758,7 +956,7 @@ class Agent:
         pid_file.write_text(str(os.getpid()), encoding="ascii")
 
         threads = [threading.Thread(target=fn, name=fn.__name__, daemon=True)
-                   for fn in (self.heartbeat_loop, self.sender_loop, self.settle_loop, self.job_loop)]
+                   for fn in (self.heartbeat_loop, self.sender_loop, self.settle_loop, self.search_loop, self.job_loop)]
         for thread in threads:
             thread.start()
         log.info("MalwareGuard agent %s running as device %s; server %s", AGENT_VERSION, self.device_id, self.api.base)
@@ -956,6 +1154,25 @@ def cmd_status(config: Config, args: argparse.Namespace) -> int:
     print(f"Queued events : {depth}")
     for directory in config.watch_directories():
         print(f"Watching      : {directory}{'' if directory.is_dir() else '  (MISSING)'}")
+    print(f"Search activity: {'enabled (opt-in)' if config['search_monitor'] else 'disabled'}")
+    return 0
+
+
+def cmd_search_consent(config: Config, args: argparse.Namespace) -> int:
+    config["search_monitor"] = args.enabled
+    config.save()
+    if not args.enabled:
+        queue_path = config.data_dir / "queue.db"
+        if queue_path.exists():
+            pending = EventQueue(queue_path)
+            pending.remove_search_events()
+            pending.close()
+        state_path = config.data_dir / "search_state.json"
+        if state_path.exists():
+            state_path.unlink()
+    print("Search activity collection " + (
+        "enabled." if args.enabled else "disabled; queued search terms removed."
+    ) + " Restart the agent for this change to take effect.")
     return 0
 
 
@@ -983,11 +1200,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     run.add_argument("--quiet", action="store_true", help="log to file only")
     sub.add_parser("check", help="diagnose the connection to the server")
     sub.add_parser("status", help="show local agent status")
+    consent = sub.add_parser("search-consent", help="enable or disable opt-in search activity collection")
+    consent_group = consent.add_mutually_exclusive_group(required=True)
+    consent_group.add_argument("--enable", dest="enabled", action="store_true", help="enable search activity collection")
+    consent_group.add_argument("--disable", dest="enabled", action="store_false", help="disable collection and clear queued search terms")
     args = parser.parse_args(argv)
 
     try:
         config = Config(Path(args.config).resolve())
-        handler = {"enroll": cmd_enroll, "run": cmd_run, "check": cmd_check, "status": cmd_status}[args.command]
+        handler = {
+            "enroll": cmd_enroll, "run": cmd_run, "check": cmd_check, "status": cmd_status,
+            "search-consent": cmd_search_consent,
+        }[args.command]
         return handler(config, args)
     except AgentError as exc:
         if log.handlers:

@@ -30,6 +30,7 @@ function mg_admin_nav(array $admin): array
             ["computers", "devices.php?view=computers", "fa-desktop", "Computers"],
             ["tokens", "devices.php?view=tokens", "fa-key", "Add a computer"],
             ["events", "devices.php?view=events", "fa-file-arrow-down", "File events"],
+            ["searches", "devices.php?view=searches", "fa-magnifying-glass-arrow-right", "Search activity"],
             ["scans", "devices.php?view=scans", "fa-magnifying-glass", "Agent scans"],
         ]],
         ["ACCOUNT", $account],

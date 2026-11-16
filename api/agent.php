@@ -5,6 +5,7 @@
 //   enroll             exchange a one-time enrollment token for a device credential
 //   heartbeat          report status; the response carries pending scan jobs
 //   events             submit a batch of file events (idempotent via event_uid)
+//   search_events      submit authorized browser/Windows search terms
 //   scan_upload        multipart upload of a file for a scan job the server issued
 //   scan_failed        report that a scan job could not be carried out
 //   rotate_credential  get a new device credential
@@ -373,6 +374,55 @@ if ($action === "events") {
         "inserted" => $inserted,
         "duplicates" => count($accepted) - $inserted,
         "auto_scans_queued" => $autoQueued,
+    ]);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Authorized search activity
+|--------------------------------------------------------------------------
+*/
+
+if ($action === "search_events") {
+    $events = $payload["events"] ?? null;
+    if (!is_array($events) || !array_is_list($events)) {
+        fail(400, "invalid_search_events", "events must be a list.");
+    }
+    if (count($events) > MAX_EVENTS_PER_BATCH) {
+        fail(413, "batch_too_large", "Send at most " . MAX_EVENTS_PER_BATCH . " search events per request.");
+    }
+
+    $insert = $pdo->prepare(
+        "INSERT IGNORE INTO search_events
+            (device_id, event_uid, source, search_term, query_url, occurred_at)
+         VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    $accepted = [];
+    $rejected = [];
+    $inserted = 0;
+    foreach ($events as $event) {
+        $uid = is_array($event) ? strtolower(clean_text($event["event_uid"] ?? "", 64)) : "";
+        $source = is_array($event) ? clean_text($event["source"] ?? "", 64) : "";
+        $term = is_array($event) ? clean_text($event["term"] ?? "", 500) : "";
+        $url = is_array($event) ? clean_text($event["query_url"] ?? "", 2048) : "";
+        $occurredAt = is_array($event) ? filter_var($event["occurred_at"] ?? null, FILTER_VALIDATE_INT) : false;
+        if (!preg_match('/^[a-f0-9]{64}$/', $uid) || $term === "" ||
+            !in_array($source, ["Google Chrome", "Microsoft Edge", "Windows Search"], true) ||
+            $occurredAt === false) {
+            $rejected[] = ["event_uid" => $uid, "reason" => "invalid_search_event"];
+            continue;
+        }
+        $insert->execute([$deviceId, $uid, $source, $term, $url === "" ? null : $url,
+                          mg_epoch_to_db($occurredAt)]);
+        $accepted[] = $uid;
+        $inserted += $insert->rowCount();
+    }
+    respond(200, [
+        "ok" => true,
+        "accepted" => $accepted,
+        "rejected" => $rejected,
+        "inserted" => $inserted,
+        "duplicates" => count($accepted) - $inserted,
     ]);
 }
 

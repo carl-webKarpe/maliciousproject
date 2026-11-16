@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 rem Server address offered by default (press Enter to accept it).
 rem XAMPP/Apache: http://IP/MaliciousProject   Built-in server: http://IP:8000
-set "DEFAULT_SERVER=http://10.83.54.4/MaliciousProject"
+set "DEFAULT_SERVER=http://10.46.124.4/MaliciousProject"
 title Install MalwareGuard agent
 cd /d "%~dp0"
 
@@ -11,7 +11,7 @@ echo.
 echo  MalwareGuard agent setup
 echo  ========================
 echo  Install this only on computers you own or are authorized to monitor.
-echo  The agent reports file activity in approved folders (default: Downloads)
+echo The agent recursively reports file and folder activity in approved folders (default: Downloads and Desktop)
 echo  to your MalwareGuard server. It never runs, deletes or moves files.
 echo.
 
@@ -76,13 +76,27 @@ if /i "%ENROLL%"=="Y" (
 )
 
 echo.
+".venv\Scripts\python.exe" agent.py search-consent --disable || goto :failed
+echo.
+echo Search activity collection is opt-in. It can read recent searches from this Windows account's
+echo Chrome or Edge search history and Windows Search, then report matching terms
+echo to the MalwareGuard dashboard. Do not enable it unless this device's user agrees.
+set "SEARCH=N"
+set /p "SEARCH=Has this device's user explicitly agreed to search activity collection? (y/N): "
+if /i "!SEARCH!"=="y" (
+    ".venv\Scripts\python.exe" agent.py search-consent --enable || goto :failed
+) else (
+    echo Search activity remains disabled.
+)
+echo.
 echo [....]  Checking the connection to the server
 ".venv\Scripts\python.exe" agent.py check
 echo.
 echo Approved folders are listed under "watch_directories" in:
 echo     %~dp0data\agent_config.json
-echo {DOWNLOADS} means this user's Downloads folder. Edit the file to add an
-echo administrator-approved folder, then restart the agent.
+echo {DOWNLOADS} means this user's Downloads folder and {DESKTOP} means their
+echo Desktop. Search activity is disabled unless the device's user opted in above.
+echo Existing browser history is not uploaded on first setup.
 echo.
 
 rem --- Optional: start automatically at sign-in ----------------------------------
