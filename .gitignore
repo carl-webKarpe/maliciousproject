@@ -5,3 +5,4 @@
 /agent/.venv/
 __pycache__/
 *.pyc
+/database/maliciousproject_xampp.sql

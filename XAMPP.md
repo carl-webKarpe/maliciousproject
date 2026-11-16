@@ -164,3 +164,16 @@ To start over with an empty activity history and no registered computers, while 
 3. Add each PC again: dashboard → **Add a computer** → **Generate token**. On the PC, delete the agent's `data` folder and run `INSTALL_AGENT.bat` with the new token.
 
 The file also works on a brand-new server: it creates the database and every table first. The reset cannot be undone.
+
+## Move to a new PC: brand-new system, same logins
+
+1. On the **current** server PC, in the project folder:
+   ```bat
+   C:\xampp\php\php.exe tools\export_for_transfer.php
+   ```
+   It creates `database\maliciousproject_xampp.sql`: every table, empty, plus your current login accounts with their passwords.
+2. Copy the project folder and that file to the new PC (`C:\xampp\htdocs\MaliciousProject`). Copy `.env` too, and `vendor` (or run `composer install`).
+3. On the new PC: XAMPP → start **Apache** and **MySQL** → phpMyAdmin → **Import** → choose `maliciousproject_xampp.sql` → **Import**.
+4. Sign in with the same email and password as before. Add each monitored PC again with a new token.
+
+The file replaces the `malwareguard` database on the PC where it is imported, and contains password hashes, so keep it private. Git ignores it.
