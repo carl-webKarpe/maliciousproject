@@ -86,9 +86,9 @@ Do this for **each PC** you want to monitor.
 
 ## Part 3: See downloaded files
 
-**1.** On the monitored PC, download any file. It goes to the **Downloads** folder.
+**1.** On the monitored PC, download a file to **Downloads** or create, rename or delete a file or folder on **Desktop**, including within nested Desktop folders.
 
-**2.** On the dashboard, open **Devices**, then **File events**. The file appears within a few seconds.
+**2.** On the dashboard, open **Devices**, then **File events**. The file activity appears within a few seconds.
 
 **3.** Click **Scan**. After about 30 seconds you'll see the result: **Safe, Low, Medium, High** or **Critical**. Click it for details.
 

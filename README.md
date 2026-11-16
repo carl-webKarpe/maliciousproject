@@ -8,7 +8,7 @@ MalwareGuard monitors **authorized** Windows PCs and laptops for new and changed
 
 **New here? Follow [SETUP.md](SETUP.md)** for a step-by-step installation and start-up guide.
 
-> Install the agent only on computers you own or are authorized to monitor, and tell the people who use them. The agent watches only the folders listed in its configuration (by default the user's Downloads, Desktop, Documents, Pictures, Videos and Music folders). It does not collect passwords, browser history, messages or keystrokes, and it never runs, deletes or moves files.
+> Install the agent only on computers you own or are authorized to monitor, and tell the people who use them. The agent recursively watches only the folders listed in its configuration (by default the user's Downloads, Desktop, Documents, Pictures, Videos and Music folders), including nested folders and folder creation, rename, move and delete events. Search-term collection is separately disabled by default and requires the device user's opt-in. When enabled, it extracts recognized search terms from Chrome/Edge history and Windows Search; it does not collect passwords, page contents, messages or keystrokes, and it never runs, deletes or moves files.
 
 ---
 
@@ -164,7 +164,7 @@ Make sure the network is set to **Private** (Settings → Network & Internet →
    - asks for the server address (shown by the start script, e.g. `http://192.168.1.10:8000`), the token and a name;
    - registers the device and stores its credential encrypted for the current Windows user;
    - runs connection diagnostics (`agent.py check`);
-   - optionally creates a scheduled task **MalwareGuard Agent** that starts the agent hidden whenever this user signs in;
+   - by default turns on **automatic start**: a shortcut in this user's Startup folder starts the agent (without a window) at every sign-in, so the PC shows **Online** by itself. No administrator rights are needed. An enrolled PC never needs a new token; `ENABLE_AUTOSTART.bat` (or `agent.py autostart on|off|status`) changes this later;
    - optionally starts the agent now.
 4. The computer appears on the Devices page and turns **Online** within one heartbeat.
 
@@ -185,6 +185,9 @@ Make sure the network is set to **Private** (Settings → Network & Internet →
 | `device_id` | Filled in automatically at enrollment |
 | `enrollment_token` | Leave empty; the installer passes it once and it is never stored |
 | `watch_directories` | **Approved folders.** Placeholders resolve to the real Windows folders (honouring redirection / cloud sync): `{DOWNLOADS}`, `{DESKTOP}`, `{DOCUMENTS}`, `{PICTURES}`, `{VIDEOS}`, `{MUSIC}`. Add only folders an administrator approved, e.g. `"C:\\LabSamples"` |
+| `search_monitor` | Defaults to `false`. Search collection is opt-in; use `agent.py search-consent --enable` only after the device user agrees. `--disable` stops collection and removes queued search terms. Existing browser/history terms are baselined and are not uploaded on first startup. |
+| `search_sources` | Sources to check: `Google Chrome`, `Microsoft Edge`, and `Windows Search`. |
+| `search_interval` | Seconds between checks for new search activity (default 60). |
 | `recursive` | `true` also watches subfolders |
 | `heartbeat_interval` | Seconds between heartbeats (the server's `AGENT_HEARTBEAT_SECONDS` is used at enrollment) |
 | `settle_seconds` | How long a file must stop changing before it is hashed and reported |
@@ -214,12 +217,15 @@ Restart the agent after editing (`STOP_AGENT.bat`, then `START_AGENT.bat`).
 
 | What happens on disk | Reported as |
 | --- | --- |
-| New file in a monitored folder | `created`, marked *potential download* |
+| New file in a Downloads folder | `created`, marked *potential download* (shown as **File downloaded**) |
+| New file anywhere else (Desktop, Documents...) | `created` |
+| Explorer's *New Text Document* / *New folder* renamed straight away | one `created` event with the final name |
 | Browser download (`file.pdf.crdownload` / `.part` renamed to `file.pdf`) | one `created` event for `file.pdf`, *potential download*, with the temporary name as `previous_path` |
 | File content changed | `modified` |
 | File renamed in the same folder | `renamed`, with `previous_path` |
-| File moved to another monitored folder | `moved`, with `previous_path` |
-| File deleted | `deleted` (no hash, since the file is gone) |
+| File moved to another monitored folder, even between separately watched folders such as Downloads → Desktop | `moved`, with `previous_path` (Windows reports this as a delete + create; the agent pairs the two by name and size within about 10 seconds) |
+| File deleted | `deleted` (no hash, since the file is gone); sent ~10 s later so a move can be recognised, but with the real deletion time |
+| Folder created, renamed, moved or deleted | the same event types, marked as folder (`hash_note = folder`) |
 
 "Potential download" means only that a new file appeared in a watched folder; it is not proof that a browser downloaded it. Temporary files (`.crdownload`, `.part`, `.tmp`, `~$…`) are ignored, a file is reported only after it stops changing and can be opened, and repeated notifications for the same file state collapse into one event.
 

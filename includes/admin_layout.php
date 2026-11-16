@@ -30,6 +30,7 @@ function mg_admin_nav(array $admin): array
             ["computers", "devices.php?view=computers", "fa-desktop", "Computers"],
             ["tokens", "devices.php?view=tokens", "fa-key", "Add a computer"],
             ["events", "devices.php?view=events", "fa-file-arrow-down", "File events"],
+            ["searches", "devices.php?view=searches", "fa-magnifying-glass-arrow-right", "Search activity"],
             ["scans", "devices.php?view=scans", "fa-magnifying-glass", "Agent scans"],
         ]],
         ["ACCOUNT", $account],
@@ -129,6 +130,42 @@ function mg_admin_page_end(string $scripts = ""): void
         </main>
     </div>
     <script>
+        // Filter bars (form.toolbar) apply on their own: a dropdown or checkbox
+        // applies as soon as it changes, a search box after a short pause.
+        (function () {
+            document.querySelectorAll("form.toolbar").forEach(function (form) {
+                let timer = null;
+                function apply(field) {
+                    try { sessionStorage.setItem("mgRefocus", field && field.id ? field.id : ""); } catch (e) { }
+                    form.requestSubmit ? form.requestSubmit() : form.submit();
+                }
+                form.querySelectorAll("select, input[type=checkbox]").forEach(function (field) {
+                    field.addEventListener("change", function () { apply(null); });
+                });
+                form.querySelectorAll("input[type=search], input[type=text]").forEach(function (field) {
+                    const initial = field.value;
+                    field.addEventListener("input", function () {
+                        clearTimeout(timer);
+                        timer = setTimeout(function () { if (field.value !== initial) apply(field); }, 600);
+                    });
+                    field.addEventListener("keydown", function (event) {
+                        if (event.key === "Enter") { event.preventDefault(); clearTimeout(timer); apply(field); }
+                    });
+                });
+            });
+            // Keep typing in the search box after the page reloads.
+            try {
+                const id = sessionStorage.getItem("mgRefocus");
+                sessionStorage.removeItem("mgRefocus");
+                const field = id && document.getElementById(id);
+                if (field) {
+                    field.focus();
+                    const end = field.value.length;
+                    field.setSelectionRange && field.setSelectionRange(end, end);
+                }
+            } catch (e) { }
+        })();
+
         // Mobile navigation toggle.
         (function () {
             const toggle = document.querySelector(".menu-toggle");

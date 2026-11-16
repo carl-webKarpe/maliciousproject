@@ -7,6 +7,12 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
+if not exist "data\credential.dat" (
+    echo [FAIL]  This computer is not enrolled yet. Run INSTALL_AGENT.bat once.
+    if /i not "%~1"=="--background" pause
+    exit /b 1
+)
+
 rem START_AGENT.bat --background is used by the sign-in scheduled task: no window,
 rem output goes to data\logs\agent.log only.
 if /i "%~1"=="--background" (

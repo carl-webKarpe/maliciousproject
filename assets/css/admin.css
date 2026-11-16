@@ -254,3 +254,22 @@ input:focus, select:focus { outline: 2px solid rgba(255, 79, 154, 0.5); outline-
     .content { padding: 20px 16px 48px; }
     .dropzone { grid-template-columns: 1fr; }
 }
+
+/* ---- File activity colours (admin/devices.php?view=events) ------------ */
+.activity { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.activity.created  { --activity: #42f59e; }
+.activity.download { --activity: #ffc65c; }
+.activity.modified { --activity: #5ab4ff; }
+.activity.renamed  { --activity: #c08bff; }
+.activity.moved    { --activity: #3fe0d0; }
+.activity.deleted  { --activity: #ff8794; }
+.activity.folder-key { --activity: var(--muted); }
+.activity { color: var(--activity, var(--muted)); border-color: color-mix(in srgb, var(--activity, var(--muted)) 45%, transparent); background: color-mix(in srgb, var(--activity, var(--muted)) 10%, transparent); }
+.activity-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.activity-table tr.activity-row td:first-child { border-left: 4px solid var(--activity, transparent); }
+.activity-row.created  { --activity: #42f59e; }
+.activity-row.download { --activity: #ffc65c; }
+.activity-row.modified { --activity: #5ab4ff; }
+.activity-row.renamed  { --activity: #c08bff; }
+.activity-row.moved    { --activity: #3fe0d0; }
+.activity-row.deleted  { --activity: #ff8794; }

@@ -6,15 +6,18 @@ laptop, reports file creation, modification, renaming and deletion to the
 MalwareGuard server, and carries out scans the server's administrators
 request for files in those directories.
 
-What it does NOT do: execute, delete or move files; read files outside the
-approved directories; collect passwords, browser history, messages or
-keystrokes; accept arbitrary commands from the server.
+It never executes, deletes or moves files, reads files outside approved
+directories, collects passwords, page contents, messages or keystrokes, or
+accepts arbitrary commands from the server. Search terms are collected from
+Chrome, Edge and Windows Search only when the device user opts in.
 
 Commands
     python agent.py enroll --server http://192.168.1.10:8000 --token TOKEN
     python agent.py run
     python agent.py check
     python agent.py status
+    python agent.py search-consent --enable|--disable
+    python agent.py autostart on|off|status
 """
 
 from __future__ import annotations
@@ -34,11 +37,13 @@ import socket
 import sqlite3
 import sys
 import threading
+import shutil
+import tempfile
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 AGENT_VERSION = "1.0.0"
 AGENT_DIR = Path(__file__).resolve().parent
@@ -54,11 +59,14 @@ DEFAULTS: Dict[str, Any] = {
     "device_id": "",
     "enrollment_token": "",
     "watch_directories": ["{DOWNLOADS}", "{DESKTOP}", "{DOCUMENTS}", "{PICTURES}", "{VIDEOS}", "{MUSIC}"],
-    "recursive": False,
+    "recursive": True,
     "heartbeat_interval": 30,
     "send_interval": 5,
     "settle_seconds": 3,
     "max_hash_mb": 200,
+    "search_monitor": False,
+    "search_interval": 60,
+    "search_sources": ["Microsoft Edge", "Google Chrome", "Windows Search"],
     "log_directory": "logs",
     "ca_bundle": "",
     "allow_http_on_public_networks": False,
@@ -87,6 +95,12 @@ class Config:
             if not isinstance(loaded, dict):
                 raise AgentError(f"Configuration {path} must contain a JSON object.")
             self.data.update(loaded)
+            # Configs written by older agents used the old default folder lists;
+            # upgrade them to the current defaults.
+            if loaded.get("watch_directories") in (["{DOWNLOADS}"], ["{DOWNLOADS}", "{DESKTOP}"]):
+                self.data["watch_directories"] = list(DEFAULTS["watch_directories"])
+            if loaded.get("recursive") is False:
+                self.data["recursive"] = True
 
     @property
     def data_dir(self) -> Path:
@@ -190,6 +204,11 @@ def downloads_folder() -> Path:
     return known_folders()["DOWNLOADS"]
 
 
+def desktop_folder() -> Path:
+    """The user's Desktop folder, honouring Windows folder redirection."""
+    return known_folders()["DESKTOP"]
+
+
 class CredentialStore:
     """Keeps the device credential in credential.dat.
 
@@ -280,6 +299,12 @@ class EventQueue:
         if not uids:
             return
         with self._lock:
+            self._db.executemany("DELETE FROM outbox WHERE event_uid = ?", [(uid,) for uid in uids])
+
+    def remove_search_events(self) -> None:
+        with self._lock:
+            rows = self._db.execute("SELECT event_uid, payload FROM outbox").fetchall()
+            uids = [uid for uid, payload in rows if "term" in json.loads(payload)]
             self._db.executemany("DELETE FROM outbox WHERE event_uid = ?", [(uid,) for uid in uids])
 
     def depth(self) -> int:
@@ -438,14 +463,24 @@ def sha256_file(path: Path, max_bytes: int) -> Tuple[Optional[str], Optional[str
 
 
 class PendingFile:
-    __slots__ = ("event_type", "previous_path", "is_download", "last_change", "last_size")
+    __slots__ = ("event_type", "previous_path", "is_download", "last_change", "last_size", "first_seen")
 
-    def __init__(self, event_type: str, previous_path: Optional[str], is_download: bool):
+    def __init__(self, event_type: str, previous_path: Optional[str], is_download: bool,
+                 first_seen: Optional[float] = None):
         self.event_type = event_type
         self.previous_path = previous_path
         self.is_download = is_download
         self.last_change = time.monotonic()
         self.last_size = -1
+        # Wall-clock time of the notification, reported as the event time even
+        # though the file is only hashed once it has settled.
+        self.first_seen = first_seen if first_seen is not None else time.time()
+
+
+# How long a new folder waits before it is reported, so that a deletion of a
+# folder with the same name elsewhere (a move between two watched folders,
+# which Windows reports as delete + create) can be paired with it.
+FOLDER_PAIR_SECONDS = 2.0
 
 
 class FileMonitor:
@@ -455,6 +490,11 @@ class FileMonitor:
     settle_seconds and it can be opened, so partial downloads are not hashed.
     Temporary download names (.crdownload, .part, ...) are ignored; their
     rename to the final name is reported as a new (potentially downloaded) file.
+
+    Windows reports a move between two separately watched folders (Downloads
+    to Desktop, say) as a deletion in one and a creation in the other. Recent
+    deletions are therefore held briefly and paired with a creation of the same
+    name elsewhere, which is then reported as one "moved" event.
     """
 
     def __init__(self, agent: "Agent"):
@@ -462,49 +502,116 @@ class FileMonitor:
         self.pending: Dict[str, PendingFile] = {}
         self.lock = threading.Lock()
         self.observer: Any = None
+        # (monotonic time, wall time, path, is_folder, last known size)
+        self.recent_deletions: List[Tuple[float, float, str, bool, Optional[int]]] = []
+        # new folders waiting FOLDER_PAIR_SECONDS: path -> (monotonic, wall time)
+        self.pending_folders: Dict[str, Tuple[float, float]] = {}
+        # sizes of files already reported, used to match a deletion to a creation
+        self.known_sizes: Dict[str, int] = {}
+
+    def _hold_seconds(self) -> float:
+        # Long enough for the matching creation to settle and be reported.
+        settle = max(1.0, float(self.agent.config["settle_seconds"]))
+        return max(10.0, settle * 3 + 4)
 
     # watchdog callback -----------------------------------------------------
     def dispatch(self, event: Any) -> None:
         try:
-            if getattr(event, "is_directory", False):
-                return
+            if getattr(event, "is_synthetic", False):
+                return  # watchdog's per-item copies of a folder move; the folder event covers them
             kind = event.event_type
+            is_directory = getattr(event, "is_directory", False)
             src = os.path.abspath(event.src_path)
             if self.agent.is_own_file(src):
                 return
+            if is_directory:
+                self._dispatch_folder(kind, src, getattr(event, "dest_path", None))
+                return
+
             if kind == "created":
-                self._touch(src, "created", None, True)
+                # A new file in a Downloads folder counts as a potential download;
+                # elsewhere (Desktop, Documents...) it is simply a new file.
+                self._touch(src, "created", None, self.agent.is_in_downloads(src))
             elif kind == "modified":
                 self._touch(src, "modified", None, False)
             elif kind == "moved":
                 dest = os.path.abspath(event.dest_path)
                 with self.lock:
-                    self.pending.pop(src, None)
+                    pending = self.pending.pop(src, None)
                 if is_temporary_name(dest):
                     return
                 if is_temporary_name(src):
                     # A browser finished a download and renamed it.
                     self._touch(dest, "created", src, True, replace=True)
+                elif pending is not None and pending.event_type == "created":
+                    # Created and renamed before it was reported, e.g. Explorer's
+                    # "New Text Document.txt" that the user then names: still a new file.
+                    self._touch(dest, "created", None, pending.is_download, replace=True,
+                                first_seen=pending.first_seen)
                 else:
                     # Same folder, name changed = rename; different folder = move.
-                    same_folder = os.path.normcase(os.path.dirname(src)) == os.path.normcase(os.path.dirname(dest))
-                    self._touch(dest, "renamed" if same_folder else "moved", src, False, replace=True)
+                    self._touch(dest, "renamed" if same_folder(src, dest) else "moved", src, False, replace=True)
             elif kind == "deleted":
                 with self.lock:
                     pending = self.pending.pop(src, None)
-                if is_temporary_name(src) or (pending is not None and pending.event_type == "created"):
-                    return  # never completed; nothing worth reporting
-                self.agent.record_event("deleted", src, None, None, None, None, False)
+                if is_temporary_name(src):
+                    return
+                if pending is not None and pending.event_type == "created":
+                    # It existed only briefly: report that it appeared, then that it went.
+                    self.agent.record_event("created", src, None, None, None, "deleted before it could be checked",
+                                            pending.is_download, occurred=pending.first_seen)
+                with self.lock:
+                    self.recent_deletions.append(
+                        (time.monotonic(), time.time(), src, False, self.known_sizes.pop(os.path.normcase(src), None)))
         except Exception:  # never let one bad notification stop monitoring
             log.exception("Error while handling a file notification")
 
-    def _touch(self, path: str, event_type: str, previous: Optional[str], is_download: bool, replace: bool = False) -> None:
+    def _dispatch_folder(self, kind: str, src: str, dest_path: Optional[str]) -> None:
+        if kind == "created":
+            with self.lock:
+                self.pending_folders[src] = (time.monotonic(), time.time())
+        elif kind == "moved" and dest_path:
+            dest = os.path.abspath(dest_path)
+            with self.lock:
+                waiting = self.pending_folders.pop(src, None)
+                if waiting is not None:
+                    # Explorer's "New folder" renamed straight away: still a new folder.
+                    self.pending_folders[dest] = waiting
+                    return
+            self.agent.record_event("renamed" if same_folder(src, dest) else "moved", dest, src,
+                                    None, None, "folder", False)
+        elif kind == "deleted":
+            with self.lock:
+                waiting = self.pending_folders.pop(src, None)
+            if waiting is not None:
+                self.agent.record_event("created", src, None, None, None, "folder", False, occurred=waiting[1])
+            with self.lock:
+                self.recent_deletions.append((time.monotonic(), time.time(), src, True, None))
+
+    def _take_deletion(self, path: str, is_folder: bool, size: Optional[int] = None) -> Optional[str]:
+        """Claim a recent deletion of an item with the same name in another place."""
+        name = os.path.normcase(os.path.basename(path))
+        here = os.path.normcase(path)
+        with self.lock:
+            for index, (_mono, _wall, deleted, deleted_is_folder, deleted_size) in enumerate(self.recent_deletions):
+                if deleted_is_folder != is_folder or os.path.normcase(deleted) == here:
+                    continue
+                if os.path.normcase(os.path.basename(deleted)) != name:
+                    continue
+                if size is not None and deleted_size is not None and size != deleted_size:
+                    continue
+                del self.recent_deletions[index]
+                return deleted
+        return None
+
+    def _touch(self, path: str, event_type: str, previous: Optional[str], is_download: bool, replace: bool = False,
+               first_seen: Optional[float] = None) -> None:
         if is_temporary_name(path):
             return
         with self.lock:
             existing = self.pending.get(path)
             if existing is None or replace:
-                self.pending[path] = PendingFile(event_type, previous, is_download)
+                self.pending[path] = PendingFile(event_type, previous, is_download, first_seen)
             else:
                 # A modification of a file we are already waiting on keeps the
                 # original (stronger) event type, e.g. created + modified = created.
@@ -533,8 +640,30 @@ class FileMonitor:
                     continue
                 ready.append((path, item))
                 del self.pending[path]
+            due_folders = [(path, times) for path, times in self.pending_folders.items()
+                           if now - times[0] >= FOLDER_PAIR_SECONDS]
+            for path, _times in due_folders:
+                del self.pending_folders[path]
+
         for path, item in ready:
             self._report(path, item)
+
+        for path, (_mono, wall) in due_folders:
+            moved_from = self._take_deletion(path, True)
+            if moved_from:
+                self.agent.record_event("moved", path, moved_from, None, None, "folder", False, occurred=wall)
+            else:
+                self.agent.record_event("created", path, None, None, None, "folder", False, occurred=wall)
+
+        # Deletions nothing claimed as a move are real deletions; they keep the
+        # time Windows reported them, not the time they are sent.
+        hold = self._hold_seconds()
+        with self.lock:
+            expired = [item for item in self.recent_deletions if now - item[0] >= hold]
+            self.recent_deletions = [item for item in self.recent_deletions if now - item[0] < hold]
+        for _mono, wall, path, is_folder, _size in expired:
+            self.agent.record_event("deleted", path, None, None, None, "folder" if is_folder else None, False,
+                                    occurred=wall)
 
     def _report(self, path: str, item: PendingFile) -> None:
         file_path = Path(path)
@@ -544,8 +673,17 @@ class FileMonitor:
             return
         max_bytes = int(self.agent.config["max_hash_mb"]) * 1024 * 1024
         digest, note = sha256_file(file_path, max_bytes)
-        self.agent.record_event(item.event_type, path, item.previous_path, stat.st_size, digest, note,
-                                item.is_download, mtime_ns=stat.st_mtime_ns)
+        event_type, previous, is_download = item.event_type, item.previous_path, item.is_download
+        if event_type == "created" and previous is None:
+            moved_from = self._take_deletion(path, False, stat.st_size)
+            if moved_from:
+                event_type, previous, is_download = "moved", moved_from, False
+        with self.lock:
+            if len(self.known_sizes) > 20000:
+                self.known_sizes.clear()
+            self.known_sizes[os.path.normcase(path)] = stat.st_size
+        self.agent.record_event(event_type, path, previous, stat.st_size, digest, note,
+                                is_download, mtime_ns=stat.st_mtime_ns, occurred=item.first_seen)
 
     def start(self, directories: List[Path], recursive: bool) -> List[str]:
         from watchdog.events import FileSystemEventHandler
@@ -575,6 +713,20 @@ class FileMonitor:
         if self.observer is not None:
             self.observer.stop()
             self.observer.join(timeout=5)
+        # Record what was still being held for move pairing, so stopping the
+        # agent never loses a deletion or a new folder.
+        with self.lock:
+            folders, self.pending_folders = list(self.pending_folders.items()), {}
+            deletions, self.recent_deletions = list(self.recent_deletions), []
+        for path, (_mono, wall) in folders:
+            self.agent.record_event("created", path, None, None, None, "folder", False, occurred=wall)
+        for _mono, wall, path, is_folder, _size in deletions:
+            self.agent.record_event("deleted", path, None, None, None, "folder" if is_folder else None, False,
+                                    occurred=wall)
+
+
+def same_folder(first: str, second: str) -> bool:
+    return os.path.normcase(os.path.dirname(first)) == os.path.normcase(os.path.dirname(second))
 
 
 def can_open(path: str) -> bool:
@@ -583,6 +735,143 @@ def can_open(path: str) -> bool:
             return True
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Authorized browser and Windows Search monitoring
+# ---------------------------------------------------------------------------
+
+SEARCH_ENGINE_KEYS = {
+    "google": "q",
+    "bing": "q",
+    "duckduckgo": "q",
+    "yahoo": "p",
+    "yandex": "text",
+    "brave": "q",
+    "ecosia": "q",
+}
+
+
+def search_term_from_url(url: str) -> Optional[str]:
+    parsed = urlparse(url)
+    host = parsed.hostname.lower() if parsed.hostname else ""
+    engine = next((name for name in SEARCH_ENGINE_KEYS if name in host), None)
+    if not engine:
+        return None
+    values = parse_qs(parsed.query).get(SEARCH_ENGINE_KEYS[engine], [])
+    term = values[0].strip() if values else ""
+    return term[:500] if term else None
+
+
+class SearchMonitor:
+    def __init__(self, agent: "Agent"):
+        self.agent = agent
+        self.state_path = agent.data_dir / "search_state.json"
+        self.initializing = not self.state_path.exists()
+        try:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+            self.seen = set(data if isinstance(data, list) else data.get("seen", []))
+        except (OSError, ValueError):
+            self.seen = set()
+
+    def save_state(self) -> None:
+        self.state_path.write_text(json.dumps(sorted(list(self.seen)[-5000:]), ensure_ascii=False), encoding="utf-8")
+
+    def record(self, term: str, source: str, occurred_at: int, query_url: str = "") -> None:
+        fingerprint = hashlib.sha256(f"{source}|{term}|{occurred_at}|{query_url}".encode("utf-8")).hexdigest()
+        if fingerprint in self.seen:
+            return
+        self.seen.add(fingerprint)
+        if self.initializing:
+            return
+        event = {
+            "event_uid": fingerprint,
+            "source": source,
+            "term": term,
+            "query_url": query_url,
+            "occurred_at": occurred_at,
+        }
+        self.agent.queue.put(event)
+
+    def chromium_profiles(self, browser: str) -> List[Tuple[str, Path]]:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            return []
+        roots = {
+            "Google Chrome": Path(local) / "Google" / "Chrome" / "User Data",
+            "Microsoft Edge": Path(local) / "Microsoft" / "Edge" / "User Data",
+        }
+        root = roots[browser]
+        if not root.is_dir():
+            return []
+        profiles = [root / "Default"]
+        profiles += sorted(root.glob("Profile *"))
+        return [(profile.name, profile / "History") for profile in profiles if (profile / "History").is_file()]
+
+    def scan_browser(self, browser: str) -> None:
+        for profile, history in self.chromium_profiles(browser):
+            copied = None
+            try:
+                fd, name = tempfile.mkstemp(prefix="malwareguard-history-", suffix=".sqlite")
+                os.close(fd)
+                copied = Path(name)
+                shutil.copy2(history, copied)
+                db = sqlite3.connect(f"file:{copied}?mode=ro", uri=True)
+                rows = db.execute(
+                    "SELECT u.url, u.title, v.visit_time FROM visits v "
+                    "JOIN urls u ON u.id=v.url "
+                    "ORDER BY v.visit_time DESC LIMIT 250"
+                ).fetchall()
+                db.close()
+                for url, title, visit_time in rows:
+                    term = search_term_from_url(str(url))
+                    if term:
+                        epoch = int((int(visit_time) / 1000000) - 11644473600)
+                        # Ignore clearly pre-existing history when the monitor first starts.
+                        if epoch >= int(time.time()) - 2 * 24 * 60 * 60:
+                            self.record(term, browser, epoch)
+            except (OSError, sqlite3.Error):
+                log.exception("Could not inspect %s %s history", browser, profile)
+            finally:
+                if copied:
+                    copied.unlink(missing_ok=True)
+
+    def scan_windows_search(self) -> None:
+        if os.name != "nt":
+            return
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                 r"Software\Microsoft\Windows\CurrentVersion\Explorer\WordWheelQuery")
+            try:
+                count = winreg.QueryInfoKey(key)[1]
+                for index in range(count):
+                    name, value, _ = winreg.EnumValue(key, index)
+                    if not name.isdigit():
+                        continue
+                    if isinstance(value, str):
+                        term = value.strip().rstrip("\x00")
+                    elif isinstance(value, bytes):
+                        term = value.decode("utf-16le", errors="ignore").strip().rstrip("\x00")
+                    else:
+                        continue
+                    if term:
+                        self.record(term, "Windows Search", 0, name)
+            finally:
+                winreg.CloseKey(key)
+        except OSError:
+            return
+
+    def scan_once(self) -> None:
+        sources = {str(item) for item in (self.agent.config["search_sources"] or [])}
+        if "Google Chrome" in sources:
+            self.scan_browser("Google Chrome")
+        if "Microsoft Edge" in sources:
+            self.scan_browser("Microsoft Edge")
+        if "Windows Search" in sources:
+            self.scan_windows_search()
+        self.save_state()
+        self.initializing = False
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +888,7 @@ class Agent:
         self.jobs: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self.active_jobs: set = set()
         self.monitor = FileMonitor(self)
+        self.search_monitor = SearchMonitor(self)
         self.last_error = ""
         try:
             self.username = getpass.getuser()
@@ -609,12 +899,19 @@ class Agent:
         self.max_upload = 50 * 1024 * 1024
         self.watched: List[str] = []
         self.approved_roots: List[str] = []
+        self.download_roots: List[str] = []
         self.api: Optional[ApiClient] = None
 
     # helpers -------------------------------------------------------------
     @property
     def device_id(self) -> str:
         return str(self.config["device_id"])
+
+    def is_in_downloads(self, path: str) -> bool:
+        """True for a path inside the user's Downloads folder or a watched
+        folder named Downloads."""
+        candidate = os.path.normcase(os.path.abspath(path))
+        return any(candidate.startswith(root) for root in self.download_roots)
 
     def is_own_file(self, path: str) -> bool:
         """True for the agent's own queue, credential, config, PID and log
@@ -627,17 +924,22 @@ class Agent:
         if os.path.dirname(candidate) + os.sep != data_root:
             return False
         name = os.path.basename(candidate)
-        return name.startswith(("queue.db", "credential.", "agent.pid", "stop.request")) or \
+        return name.startswith(("queue.db", "credential.", "agent.pid", "stop.request", "search_state.json")) or \
             name.startswith(os.path.normcase(self.config.path.stem))
 
     def record_event(self, event_type: str, path: str, previous: Optional[str], size: Optional[int],
-                     digest: Optional[str], note: Optional[str], is_download: bool, mtime_ns: int = 0) -> None:
-        occurred = time.time()
+                     digest: Optional[str], note: Optional[str], is_download: bool, mtime_ns: int = 0,
+                     occurred: Optional[float] = None) -> None:
+        # occurred = when Windows reported the change (kept even if the event
+        # is only sent later, e.g. after the file settles or the server is back).
+        occurred = time.time() if occurred is None else occurred
         # Identical notifications for the same file state produce the same
         # uid, so neither the local queue nor the server stores them twice.
+        # Items without a hash (folders, deletions) include the time, so doing
+        # the same thing again later is a new event.
         identity = "|".join([
             self.device_id, event_type, path, previous or "", str(size), str(mtime_ns), digest or "",
-            str(int(occurred)) if event_type == "deleted" else "",
+            str(int(occurred)) if digest is None else "",
         ])
         event = {
             "event_uid": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
@@ -649,14 +951,16 @@ class Agent:
             "hash_note": note,
             "user_account": self.username,
             "is_potential_download": bool(is_download),
-            # These events are observed in real time, so the moment the agent
-            # receives the notification is both the detection time and the best
-            # available event time. (Offline reconciliation would set them apart.)
+            # Observed in real time, so the notification time is both the
+            # detection time and the best available event time.
             "occurred_at": int(occurred),
             "detected_at": int(occurred),
         }
         if self.queue.put(event):
-            log.info("%s %s%s", event_type.upper(), path, f" (sha256 {digest[:12]}...)" if digest else "")
+            kind = "FOLDER " if note == "folder" else ""
+            log.info("%s%s %s%s%s", kind, event_type.upper(), path,
+                     f" (from {previous})" if previous and event_type in ("renamed", "moved") else "",
+                     f" (sha256 {digest[:12]}...)" if digest else "")
 
     def set_error(self, message: str) -> None:
         if message != self.last_error:
@@ -723,12 +1027,21 @@ class Agent:
                 if batch:
                     try:
                         assert self.api is not None
-                        response = self.api.post("events", {"events": batch}, timeout=30)
-                        rejected = response.get("rejected", [])
+                        file_events = [item for item in batch if "event_type" in item]
+                        search_events = [item for item in batch if "term" in item]
+                        accepted = []
+                        rejected = []
+                        if file_events:
+                            response = self.api.post("events", {"events": file_events}, timeout=30)
+                            accepted.extend(response.get("accepted", []))
+                            rejected.extend(response.get("rejected", []))
+                        if search_events:
+                            response = self.api.post("search_events", {"events": search_events}, timeout=30)
+                            accepted.extend(response.get("accepted", []))
+                            rejected.extend(response.get("rejected", []))
                         for item in rejected:
                             log.warning("Server rejected event %s: %s", item.get("event_uid"), item.get("reason"))
-                        self.queue.remove(list(response.get("accepted", [])) +
-                                          [str(item.get("event_uid")) for item in rejected])
+                        self.queue.remove(list(accepted) + [str(item.get("event_uid")) for item in rejected])
                         self.backoff = 0
                         if len(batch) == 100:
                             wait = 0.2  # more queued; keep draining
@@ -747,6 +1060,15 @@ class Agent:
         while not self.stop_event.is_set():
             self.monitor.settle_once()
             self.stop_event.wait(1.0)
+
+    def search_loop(self) -> None:
+        while not self.stop_event.is_set():
+            if bool(self.config["search_monitor"]):
+                try:
+                    self.search_monitor.scan_once()
+                except Exception:
+                    log.exception("Search monitoring failed")
+            self.stop_event.wait(max(15, int(self.config["search_interval"])))
 
     def job_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -810,6 +1132,10 @@ class Agent:
         self.api = ApiClient(self.config, self.device_id, credential)
 
         directories = self.config.watch_directories()
+        download_dirs = {os.path.normcase(os.path.abspath(str(downloads_folder())))}
+        download_dirs.update(os.path.normcase(os.path.abspath(str(p))) for p in directories
+                             if os.path.basename(os.path.normpath(str(p))).lower() == "downloads")
+        self.download_roots = [d + os.sep for d in download_dirs]
         self.watched = self.monitor.start(directories, bool(self.config["recursive"]))
         self.approved_roots = [os.path.normcase(os.path.realpath(p)) + os.sep for p in self.watched]
 
@@ -820,7 +1146,7 @@ class Agent:
         pid_file.write_text(str(os.getpid()), encoding="ascii")
 
         threads = [threading.Thread(target=fn, name=fn.__name__, daemon=True)
-                   for fn in (self.heartbeat_loop, self.sender_loop, self.settle_loop, self.job_loop)]
+                   for fn in (self.heartbeat_loop, self.sender_loop, self.settle_loop, self.search_loop, self.job_loop)]
         for thread in threads:
             thread.start()
         log.info("MalwareGuard agent %s running as device %s; server %s", AGENT_VERSION, self.device_id, self.api.base)
@@ -866,6 +1192,9 @@ def setup_logging(config: Config, verbose: bool = True) -> None:
 
 
 def pid_alive(pid: int) -> bool:
+    """True only if `pid` is a running agent. After a restart Windows can give
+    an old agent's PID to another program; that must not count, or the agent
+    would refuse to start at sign-in."""
     if pid <= 0:
         return False
     if os.name == "nt":
@@ -876,14 +1205,24 @@ def pid_alive(pid: int) -> bool:
         try:
             code = ctypes.c_ulong()
             ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-            return code.value == 259  # STILL_ACTIVE
+            if code.value != 259:  # STILL_ACTIVE
+                return False
+            buffer = ctypes.create_unicode_buffer(1024)
+            size = ctypes.c_ulong(len(buffer))
+            if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                return "python" in os.path.basename(buffer.value).lower()
+            return True  # could not tell; assume it is the agent
         finally:
             ctypes.windll.kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
-        return True
     except OSError:
         return False
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            return b"agent.py" in handle.read()
+    except OSError:
+        return True
 
 
 def cmd_enroll(config: Config, args: argparse.Namespace) -> int:
@@ -1018,6 +1357,25 @@ def cmd_status(config: Config, args: argparse.Namespace) -> int:
     print(f"Queued events : {depth}")
     for directory in config.watch_directories():
         print(f"Watching      : {directory}{'' if directory.is_dir() else '  (MISSING)'}")
+    print(f"Search activity: {'enabled (opt-in)' if config['search_monitor'] else 'disabled'}")
+    return 0
+
+
+def cmd_search_consent(config: Config, args: argparse.Namespace) -> int:
+    config["search_monitor"] = args.enabled
+    config.save()
+    if not args.enabled:
+        queue_path = config.data_dir / "queue.db"
+        if queue_path.exists():
+            pending = EventQueue(queue_path)
+            pending.remove_search_events()
+            pending.close()
+        state_path = config.data_dir / "search_state.json"
+        if state_path.exists():
+            state_path.unlink()
+    print("Search activity collection " + (
+        "enabled." if args.enabled else "disabled; queued search terms removed."
+    ) + " Restart the agent for this change to take effect.")
     return 0
 
 
@@ -1033,6 +1391,68 @@ def cmd_run(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+AUTOSTART_NAME = "MalwareGuard Agent.lnk"
+
+
+def startup_folder() -> Optional[Path]:
+    appdata = os.environ.get("APPDATA")
+    if os.name != "nt" or not appdata:
+        return None
+    return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def cmd_autostart(config: Config, args: argparse.Namespace) -> int:
+    """Start the agent (without a window) whenever this Windows user signs in.
+
+    Uses a shortcut in the user's Startup folder, which needs no administrator
+    rights, unlike a scheduled task. The agent keeps its enrollment, so a PC
+    that was enrolled once only needs to be switched on and signed in to.
+    """
+    import subprocess
+
+    folder = startup_folder()
+    if folder is None:
+        raise AgentError("Automatic start is only available on Windows.")
+    shortcut = folder / AUTOSTART_NAME
+
+    # Remove the scheduled task older installers created, so the agent is not
+    # started twice. Errors (no such task) are expected and ignored.
+    subprocess.run(["schtasks", "/delete", "/tn", "MalwareGuard Agent", "/f"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+    if args.action == "status":
+        print("Automatic start: " + ("ON" if shortcut.exists() else "OFF") + f" ({shortcut})")
+        return 0
+    if args.action == "off":
+        if shortcut.exists():
+            shortcut.unlink()
+        print("Automatic start is OFF. Start the agent with START_AGENT.bat when needed.")
+        return 0
+
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if not pythonw.exists():
+        pythonw = Path(sys.executable)
+    folder.mkdir(parents=True, exist_ok=True)
+    # Paths travel as environment variables, so spaces and quotes in folder
+    # names cannot break the PowerShell command.
+    env = dict(os.environ,
+               MG_SHORTCUT=str(shortcut),
+               MG_TARGET=str(pythonw),
+               MG_ARGS=f'"{AGENT_DIR / "agent.py"}" run --quiet',
+               MG_WORKDIR=str(AGENT_DIR))
+    script = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:MG_SHORTCUT);"
+              "$s.TargetPath=$env:MG_TARGET;$s.Arguments=$env:MG_ARGS;"
+              "$s.WorkingDirectory=$env:MG_WORKDIR;$s.WindowStyle=7;"
+              "$s.Description='MalwareGuard endpoint agent';$s.Save()")
+    result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+                            env=env, capture_output=True, text=True, check=False)
+    if result.returncode != 0 or not shortcut.exists():
+        raise AgentError("Could not create the Startup shortcut: " + (result.stderr.strip() or "unknown error"))
+    print(f"Automatic start is ON: the agent starts (without a window) whenever this user signs in.\n"
+          f"Shortcut: {shortcut}")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="MalwareGuard endpoint agent")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="path to agent_config.json")
@@ -1045,11 +1465,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     run.add_argument("--quiet", action="store_true", help="log to file only")
     sub.add_parser("check", help="diagnose the connection to the server")
     sub.add_parser("status", help="show local agent status")
+    consent = sub.add_parser("search-consent", help="enable or disable opt-in search activity collection")
+    consent_group = consent.add_mutually_exclusive_group(required=True)
+    consent_group.add_argument("--enable", dest="enabled", action="store_true", help="enable search activity collection")
+    consent_group.add_argument("--disable", dest="enabled", action="store_false", help="disable collection and clear queued search terms")
+    autostart = sub.add_parser("autostart", help="start the agent automatically when this Windows user signs in")
+    autostart.add_argument("action", choices=["on", "off", "status"])
     args = parser.parse_args(argv)
 
     try:
         config = Config(Path(args.config).resolve())
-        handler = {"enroll": cmd_enroll, "run": cmd_run, "check": cmd_check, "status": cmd_status}[args.command]
+        handler = {
+            "enroll": cmd_enroll, "run": cmd_run, "check": cmd_check, "status": cmd_status,
+            "search-consent": cmd_search_consent, "autostart": cmd_autostart,
+        }[args.command]
         return handler(config, args)
     except AgentError as exc:
         if log.handlers:

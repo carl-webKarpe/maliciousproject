@@ -3,6 +3,7 @@
 //   computers  registered computers and their status (default)
 //   tokens     "Add a computer": enrollment tokens and setup steps
 //   events     file events reported by agents, with filters and Scan buttons
+//   searches   authorized browser and Windows Search terms
 //   scans      scans requested from agents, and scan details (?scan=ID)
 // Admins and verified super admins only.
 
@@ -167,6 +168,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if ($event["event_type"] === "deleted") {
             redirect_back("The file was deleted, so there is nothing to scan.", true, "#events");
         }
+        if ($event["sha256"] === null) {
+            redirect_back("Folders do not have a file hash and cannot be scanned.", true, "#events");
+        }
         if ($event["status"] !== "active") {
             redirect_back("The device is not active, so it cannot perform scans.", true, "#events");
         }
@@ -205,7 +209,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 |--------------------------------------------------------------------------
 */
 
-$views = ["computers", "tokens", "events", "scans"];
+$views = ["computers", "tokens", "events", "searches", "scans"];
 $view = is_string($_GET["view"] ?? null) && in_array($_GET["view"], $views, true) ? $_GET["view"] : "computers";
 if (isset($_GET["scan"])) {
     $view = "scans";
@@ -217,6 +221,19 @@ $awaiting = (int) $pdo->query("SELECT COUNT(*) FROM enrollment_tokens WHERE used
 if (($_GET["format"] ?? "") === "json") {
     header("Content-Type: application/json");
     header("Cache-Control: no-store");
+    $activity = $_GET["activity"] ?? null;
+    if (in_array($activity, ["events", "searches"], true)) {
+        $table = $activity === "searches" ? "search_events" : "file_events";
+        $activityStatus = $pdo->query("SELECT COALESCE(MAX(id), 0) AS latest_id, COUNT(*) AS total FROM {$table}")->fetch();
+        echo json_encode([
+            "ok" => true,
+            "activity" => $activity,
+            "latest_id" => (int) $activityStatus["latest_id"],
+            "total" => (int) $activityStatus["total"],
+            "server_time" => time(),
+        ]);
+        exit;
+    }
     $devicesJson = [];
     foreach ($pdo->query("SELECT " . MG_DEVICE_COLUMNS . " FROM endpoint_devices d")->fetchAll() as $row) {
         [$class, $label, $explain] = mg_device_status($row);
@@ -533,29 +550,171 @@ HTML;
 
 /*
 |--------------------------------------------------------------------------
+| Authorized search activity
+|--------------------------------------------------------------------------
+*/
+
+if ($view === "searches") {
+    $perPage = 50;
+    $searchSource = is_string($_GET["source"] ?? null) ? $_GET["source"] : "";
+    $where = ["s.source <> 'Pinterest'"];
+    $params = [];
+    if ($filterDevice !== "") {
+        $where[] = "s.device_id = ?";
+        $params[] = $filterDevice;
+    }
+    if (in_array($searchSource, ["Google Chrome", "Microsoft Edge", "Windows Search"], true)) {
+        $where[] = "s.source = ?";
+        $params[] = $searchSource;
+    }
+    if ($filterQuery !== "") {
+        $like = "%" . addcslashes($filterQuery, "\\%") . "%";
+        $where[] = "s.search_term LIKE ?";
+        $params[] = $like;
+    }
+    $stmt = $pdo->prepare(
+        "SELECT s.*, d.display_name, d.hostname
+         FROM search_events s JOIN endpoint_devices d ON d.device_id=s.device_id
+         " . ($where ? "WHERE " . implode(" AND ", $where) : "") . "
+         ORDER BY s.occurred_at DESC, s.id DESC
+         LIMIT " . ($perPage + 1) . " OFFSET " . (($page - 1) * $perPage)
+    );
+    $stmt->execute($params);
+    $searchRows = $stmt->fetchAll();
+    $hasNextPage = count($searchRows) > $perPage;
+    $searchRows = array_slice($searchRows, 0, $perPage);
+    $deviceOptions = $pdo->query("SELECT device_id, display_name, hostname FROM endpoint_devices ORDER BY display_name")->fetchAll();
+
+    mg_admin_page_start($admin, "searches", "Search activity",
+        'Opt-in search terms from Google Chrome, Microsoft Edge and Windows Search. The dashboard stores the term and source, not browser passwords or page contents. <span class="live-status" id="activityLiveStatus" role="status" aria-live="polite">Checking for new activity...</span>');
+    mg_admin_notice($notice);
+    ?>
+    <section class="panel">
+        <form method="get" action="devices.php" class="form-row toolbar">
+            <input type="hidden" name="view" value="searches">
+            <div><label for="search-q">Search term</label><input id="search-q" name="q" type="search" value="<?= mg_h($filterQuery) ?>" placeholder="Search activity"></div>
+            <div><label for="search-device">Computer</label><select id="search-device" name="device">
+                <option value="">All computers</option>
+                <?php foreach ($deviceOptions as $option): ?>
+                    <option value="<?= mg_h($option["device_id"]) ?>"<?= $filterDevice === $option["device_id"] ? " selected" : "" ?>><?= mg_h(($option["display_name"] ?: $option["hostname"]) ?: $option["device_id"]) ?></option>
+                <?php endforeach; ?>
+            </select></div>
+            <div><label for="search-source">Source</label><select id="search-source" name="source">
+                <option value="">All sources</option>
+                <?php foreach (["Google Chrome", "Microsoft Edge", "Windows Search"] as $source): ?>
+                    <option value="<?= mg_h($source) ?>"<?= $searchSource === $source ? " selected" : "" ?>><?= mg_h($source) ?></option>
+                <?php endforeach; ?>
+            </select></div>
+            <div class="actions"><a class="button ghost" href="devices.php?view=searches">Clear</a></div>
+        </form>
+        <?php if (!$searchRows): ?>
+            <?php mg_admin_empty("fa-magnifying-glass", "No search activity yet", "Search collection must be explicitly enabled by each device user during agent setup. After opt-in, new Chrome, Edge and Windows Search activity appears after the next collection interval. Existing history is not uploaded on first setup."); ?>
+        <?php else: ?>
+            <div class="table-wrap"><table>
+                <thead><tr><th>When</th><th>Computer</th><th>Source</th><th>Search term</th></tr></thead>
+                <tbody>
+                <?php foreach ($searchRows as $row): ?>
+                    <tr>
+                        <td><?= mg_h($row["occurred_at"]) ?></td>
+                        <td><?= mg_h(($row["display_name"] ?: $row["hostname"]) ?: $row["device_id"]) ?></td>
+                        <td><?= mg_h($row["source"]) ?></td>
+                        <td><strong><?= mg_h($row["search_term"]) ?></strong></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table></div>
+            <nav class="pagination">
+                <?php if ($page > 1): ?><a class="button ghost" href="devices.php?<?= mg_h(http_build_query(["view" => "searches", "device" => $filterDevice, "source" => $searchSource, "q" => $filterQuery, "page" => $page - 1])) ?>">Previous</a><?php endif; ?>
+                <?php if ($hasNextPage): ?><a class="button" href="devices.php?<?= mg_h(http_build_query(["view" => "searches", "device" => $filterDevice, "source" => $searchSource, "q" => $filterQuery, "page" => $page + 1])) ?>">Next</a><?php endif; ?>
+            </nav>
+        <?php endif; ?>
+    </section>
+    <?php
+    $script = <<<'HTML'
+    <script>
+        const activityStatus = document.getElementById("activityLiveStatus");
+        let lastActivity = 0;
+        let checkingActivity = false;
+        function refreshSearchActivity() {
+            if (checkingActivity || document.hidden) return;
+            checkingActivity = true;
+            fetch("devices.php?format=json&activity=searches", { credentials: "same-origin" })
+                .then(function (response) { if (!response.ok) throw new Error("server returned " + response.status); return response.json(); })
+                .then(function (data) {
+                    if (lastActivity !== 0 && data.latest_id > lastActivity) {
+                        location.reload();
+                        return;
+                    }
+                    lastActivity = data.latest_id;
+                    activityStatus.textContent = "Live · checked " + new Date().toLocaleTimeString() + ".";
+                })
+                .catch(function () { activityStatus.textContent = "Live update unavailable; the table remains usable."; })
+                .finally(function () { checkingActivity = false; });
+        }
+        refreshSearchActivity();
+        setInterval(refreshSearchActivity, 15000);
+    </script>
+HTML;
+    mg_admin_page_end($script);
+    exit;
+}
+
+/*
+|--------------------------------------------------------------------------
 | File events
 |--------------------------------------------------------------------------
 */
 
 if ($view === "events") {
     $perPage = 50;
-    $where = [];
+    // Activity filter: "file:created" ... "folder:moved", or "download".
+    // Older links (?type=created, ?downloads=1) still work.
+    $activityFilters = [
+        "file:created" => "File created",
+        "file:modified" => "File modified",
+        "file:deleted" => "File deleted",
+        "file:renamed" => "File renamed",
+        "file:moved" => "File moved",
+        "folder:created" => "Folder created",
+        "folder:deleted" => "Folder deleted",
+        "folder:renamed" => "Folder renamed",
+        "folder:moved" => "Folder moved",
+        "download" => "Downloads",
+    ];
+    $activity = $filterType;
+    if ($filterDownloads && $activity === "") {
+        $activity = "download";
+    }
+    if (in_array($activity, ["created", "modified", "renamed", "moved", "deleted"], true)) {
+        $activity = "file:" . $activity;
+    }
+    if (!isset($activityFilters[$activity])) {
+        $activity = "";
+    }
+
+    $where = ["LOWER(e.file_name) <> 'search_state.json'"];
     $params = [];
+    $filtered = false;
     if ($filterDevice !== "") {
         $where[] = "e.device_id = ?";
         $params[] = $filterDevice;
+        $filtered = true;
     }
-    if (in_array($filterType, ["created", "modified", "renamed", "moved", "deleted"], true)) {
+    if ($activity === "download") {
+        $where[] = "e.is_potential_download = 1";
+        $filtered = true;
+    } elseif ($activity !== "") {
+        [$kind, $eventType] = explode(":", $activity, 2);
         $where[] = "e.event_type = ?";
-        $params[] = $filterType;
+        $params[] = $eventType;
+        $where[] = $kind === "folder" ? "e.hash_note = 'folder'" : "(e.hash_note IS NULL OR e.hash_note <> 'folder')";
+        $filtered = true;
     }
     if ($filterQuery !== "") {
         $like = "%" . addcslashes($filterQuery, "\\%_") . "%";
-        $where[] = "(e.file_name LIKE ? OR e.file_path LIKE ? OR e.sha256 LIKE ?)";
-        array_push($params, $like, $like, $like);
-    }
-    if ($filterDownloads) {
-        $where[] = "e.is_potential_download = 1";
+        $where[] = "(e.file_name LIKE ? OR e.file_path LIKE ? OR e.previous_path LIKE ? OR e.sha256 LIKE ?)";
+        array_push($params, $like, $like, $like, $like);
+        $filtered = true;
     }
     $stmt = $pdo->prepare(
         "SELECT e.*, d.display_name, d.hostname, d.status AS device_status,
@@ -567,7 +726,7 @@ if ($view === "events") {
          LEFT JOIN scan_requests sr ON sr.id = (SELECT MAX(id) FROM scan_requests WHERE file_event_id = e.id)
          LEFT JOIN scans s ON s.id = sr.scan_id
          LEFT JOIN scans hs ON hs.id = (SELECT MAX(id) FROM scans WHERE e.sha256 IS NOT NULL AND file_hash = e.sha256)
-         " . ($where ? "WHERE " . implode(" AND ", $where) : "") . "
+         WHERE " . implode(" AND ", $where) . "
          ORDER BY e.occurred_at DESC, e.id DESC
          LIMIT " . ($perPage + 1) . " OFFSET " . (($page - 1) * $perPage)
     );
@@ -576,10 +735,35 @@ if ($view === "events") {
     $hasNextPage = count($events) > $perPage;
     $events = array_slice($events, 0, $perPage);
     $deviceOptions = $pdo->query("SELECT device_id, display_name, hostname FROM endpoint_devices ORDER BY display_name")->fetchAll();
-    $eventIcons = ["created" => "fa-file-circle-plus", "modified" => "fa-file-pen", "renamed" => "fa-i-cursor", "moved" => "fa-file-export", "deleted" => "fa-file-circle-xmark"];
+
+    // Colour and icon per activity (styles: .activity.* in assets/css/admin.css).
+    $describe = static function (array $event): array {
+        $isFolder = $event["hash_note"] === "folder";
+        $type = $event["event_type"];
+        if (!$isFolder && $type === "created" && $event["is_potential_download"]) {
+            return ["download", "fa-file-arrow-down", "File downloaded"];
+        }
+        $icons = [
+            "created" => $isFolder ? "fa-folder-plus" : "fa-file-circle-plus",
+            "modified" => "fa-file-pen",
+            "renamed" => "fa-i-cursor",
+            "moved" => $isFolder ? "fa-folder-tree" : "fa-file-export",
+            "deleted" => $isFolder ? "fa-folder-minus" : "fa-file-circle-xmark",
+        ];
+        $verbs = ["created" => "created", "modified" => "modified", "renamed" => "renamed", "moved" => "moved", "deleted" => "deleted"];
+        return [$type, $icons[$type] ?? "fa-file", ($isFolder ? "Folder " : "File ") . ($verbs[$type] ?? $type)];
+    };
+    $legend = [
+        ["created", "fa-file-circle-plus", "Created"],
+        ["download", "fa-file-arrow-down", "Download"],
+        ["modified", "fa-file-pen", "Modified"],
+        ["renamed", "fa-i-cursor", "Renamed"],
+        ["moved", "fa-file-export", "Moved"],
+        ["deleted", "fa-file-circle-xmark", "Deleted"],
+    ];
 
     mg_admin_page_start($admin, "events", "File events",
-        "Files that appeared, changed, moved or were deleted in the watched folders (usually Downloads). Click <strong>Scan</strong> to check a file; the computer sends it to this server and only its hash goes to VirusTotal.");
+        'Files and folders created, changed, renamed, moved or deleted in the watched folders (Downloads, Desktop, Documents, Pictures, Videos and Music by default, including subfolders). New activity appears automatically. Click <strong>Scan</strong> to check a file; only its hash goes to VirusTotal. <span class="live-status" id="activityLiveStatus" role="status" aria-live="polite">Checking for new activity...</span>');
     mg_admin_notice($notice);
     ?>
     <section class="panel">
@@ -594,37 +778,45 @@ if ($view === "events") {
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div><label for="f-type">What happened</label>
+            <div><label for="f-type">Activity</label>
                 <select id="f-type" name="type">
-                    <option value="">Anything</option>
-                    <?php foreach (["created" => "New file", "modified" => "Changed", "renamed" => "Renamed", "moved" => "Moved", "deleted" => "Deleted"] as $type => $label): ?>
-                        <option value="<?= $type ?>"<?= $filterType === $type ? " selected" : "" ?>><?= $label ?></option>
+                    <option value="">All</option>
+                    <?php foreach ($activityFilters as $value => $label): ?>
+                        <option value="<?= mg_h($value) ?>"<?= $activity === $value ? " selected" : "" ?>><?= mg_h($label) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div><label class="check"><input type="checkbox" name="downloads" value="1"<?= $filterDownloads ? " checked" : "" ?>> Downloads only</label></div>
-            <div class="actions"><button type="submit"><i class="fa-solid fa-filter" aria-hidden="true"></i>Filter</button><a class="button ghost" href="devices.php?view=events">Clear</a></div>
+            <div class="actions"><a class="button ghost" href="devices.php?view=events">Clear</a></div>
         </form>
 
+        <div class="activity-legend" aria-label="Colour key">
+            <?php foreach ($legend as [$class, $icon, $label]): ?>
+                <span class="activity <?= $class ?>"><i class="fa-solid <?= $icon ?>" aria-hidden="true"></i><?= $label ?></span>
+            <?php endforeach; ?>
+            <span class="activity folder-key"><i class="fa-solid fa-folder" aria-hidden="true"></i>Folder icons = folder activity</span>
+        </div>
+
         <?php if (!$events): ?>
-            <?php if ($where): ?>
-                <?php mg_admin_empty("fa-filter", "Nothing matches these filters", "Try a different search or clear the filters.", '<a class="button" href="devices.php?view=events">Clear filters</a>'); ?>
+            <?php if ($filtered): ?>
+                <?php mg_admin_empty("fa-filter", "Nothing matches these filters", "Try a different search or choose All.", '<a class="button" href="devices.php?view=events">Show all</a>'); ?>
             <?php elseif ($stats["total"] === 0): ?>
                 <?php mg_admin_empty("fa-desktop", "No computers yet", "File events appear once a computer runs the agent.", $addButton); ?>
             <?php else: ?>
-                <?php mg_admin_empty("fa-file-arrow-down", "No file events yet", "Download any file on a monitored computer. It appears here within a few seconds. Files that were already there are not listed."); ?>
+                <?php mg_admin_empty("fa-file-arrow-down", "No file events yet", "Create, rename, move or delete a file or folder in a watched folder (Downloads, Desktop, Documents...) on a monitored computer. It appears here within a few seconds."); ?>
             <?php endif; ?>
         <?php else: ?>
         <div class="table-wrap">
-            <table>
-                <thead><tr><th>When</th><th>File</th><th>Computer</th><th>What happened</th><th>Size</th><th>Scan</th></tr></thead>
+            <table class="activity-table">
+                <thead><tr><th>When</th><th>Activity</th><th>Name</th><th>Computer</th><th>Size</th><th>Scan</th></tr></thead>
                 <tbody>
                 <?php foreach ($events as $event): ?>
-                    <tr>
+                    <?php [$activityClass, $activityIcon, $activityLabel] = $describe($event); ?>
+                    <?php $previousName = $event["previous_path"] ? basename(str_replace("\\", "/", $event["previous_path"])) : ""; ?>
+                    <tr class="activity-row <?= mg_h($activityClass) ?>">
                         <td title="Detected: <?= mg_h($event["detected_at"] ?: $event["occurred_at"]) ?>&#10;Received by server: <?= mg_h($event["received_at"]) ?>"><?= mg_h($event["occurred_at"]) ?></td>
+                        <td><span class="activity <?= mg_h($activityClass) ?>"><i class="fa-solid <?= mg_h($activityIcon) ?>" aria-hidden="true"></i><?= mg_h($activityLabel) ?></span></td>
                         <td>
-                            <?php $previousName = $event["previous_path"] ? basename(str_replace("\\", "/", $event["previous_path"])) : ""; ?>
-                            <?php if ($previousName !== "" && in_array($event["event_type"], ["renamed", "moved"], true)): ?>
+                            <?php if ($previousName !== "" && in_array($event["event_type"], ["renamed", "moved"], true) && $previousName !== $event["file_name"]): ?>
                                 <strong><?= mg_h($previousName) ?> &rarr; <?= mg_h($event["file_name"]) ?></strong><br>
                             <?php else: ?>
                                 <strong><?= mg_h($event["file_name"]) ?></strong><br>
@@ -635,11 +827,6 @@ if ($view === "events") {
                         <td>
                             <?= mg_h(($event["display_name"] ?: $event["hostname"]) ?: $event["device_id"]) ?>
                             <?php if (!empty($event["user_account"])): ?><br><small><i class="fa-solid fa-user" aria-hidden="true"></i> <?= mg_h($event["user_account"]) ?></small><?php endif; ?>
-                        </td>
-                        <td>
-                            <i class="fa-solid <?= $eventIcons[$event["event_type"]] ?? "fa-file" ?>" aria-hidden="true"></i>
-                            <?= mg_h(["created" => "New file", "modified" => "Changed", "renamed" => "Renamed", "moved" => "Moved", "deleted" => "Deleted"][$event["event_type"]] ?? $event["event_type"]) ?>
-                            <?php if ($event["is_potential_download"]): ?><br><small>Download</small><?php endif; ?>
                         </td>
                         <td><?= mg_h(mg_format_bytes($event["file_size"] === null ? null : (int) $event["file_size"])) ?></td>
                         <td>
@@ -654,7 +841,7 @@ if ($view === "events") {
                                     <small>Same file checked before:</small>
                                     <a href="devices.php?view=scans&amp;scan=<?= (int) $event["hash_scan_id"] ?>"><?= mg_risk_badge($event["hash_scan_threat"]) ?></a><br>
                                 <?php endif; ?>
-                                <?php if ($event["event_type"] !== "deleted" && $event["device_status"] === "active"): ?>
+                                <?php if ($event["sha256"] !== null && $event["event_type"] !== "deleted" && $event["device_status"] === "active"): ?>
                                     <form class="inline" method="post" action="devices.php">
                                         <?= hidden_fields($csrf, $returnQuery) ?>
                                         <input type="hidden" name="action" value="request_scan">
@@ -672,14 +859,41 @@ if ($view === "events") {
             </table>
         </div>
         <div class="pager">
-            <?php if ($page > 1): ?><a class="button small ghost" href="<?= mg_h(page_link(["page" => $page - 1])) ?>"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i>Newer</a><?php endif; ?>
+            <?php if ($page > 1): ?><a class="button small ghost" href="<?= mg_h(page_link(["page" => $page - 1, "type" => $activity, "downloads" => ""])) ?>"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i>Newer</a><?php endif; ?>
             <span>Page <?= $page ?></span>
-            <?php if ($hasNextPage): ?><a class="button small ghost" href="<?= mg_h(page_link(["page" => $page + 1])) ?>">Older<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a><?php endif; ?>
+            <?php if ($hasNextPage): ?><a class="button small ghost" href="<?= mg_h(page_link(["page" => $page + 1, "type" => $activity, "downloads" => ""])) ?>">Older<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a><?php endif; ?>
         </div>
         <?php endif; ?>
     </section>
     <?php
-    mg_admin_page_end();
+    $script = <<<'HTML'
+    <script>
+        // New activity appears without a click: check every 5 seconds and
+        // reload when a newer event exists (filters stay as they are).
+        const activityStatus = document.getElementById("activityLiveStatus");
+        let lastActivity = 0;
+        let checkingActivity = false;
+        function refreshFileActivity() {
+            if (checkingActivity || document.hidden) return;
+            checkingActivity = true;
+            fetch("devices.php?format=json&activity=events", { credentials: "same-origin" })
+                .then(function (response) { if (!response.ok) throw new Error("server returned " + response.status); return response.json(); })
+                .then(function (data) {
+                    if (lastActivity !== 0 && data.latest_id > lastActivity) {
+                        location.reload();
+                        return;
+                    }
+                    lastActivity = data.latest_id;
+                    activityStatus.textContent = "Live · checked " + new Date().toLocaleTimeString() + ".";
+                })
+                .catch(function () { activityStatus.textContent = "Live update unavailable; the table remains usable."; })
+                .finally(function () { checkingActivity = false; });
+        }
+        refreshFileActivity();
+        setInterval(refreshFileActivity, 5000);
+    </script>
+HTML;
+    mg_admin_page_end($script);
     exit;
 }
 
@@ -722,7 +936,7 @@ if ($detailId && !mg_render_scan_detail($pdo, (int) $detailId, page_link(["scan"
     <form method="get" action="devices.php" class="form-row toolbar" style="max-width:360px;">
         <input type="hidden" name="view" value="scans">
         <div><label for="risk">Show</label>
-            <select id="risk" name="risk" onchange="this.form.submit()">
+            <select id="risk" name="risk">
                 <option value="">All scans</option>
                 <?php foreach (["critical" => "Critical", "high" => "High", "medium" => "Medium", "low" => "Low", "safe" => "Safe", "unknown" => "Unknown", "not_scanned" => "Waiting or failed"] as $risk => $label): ?>
                     <option value="<?= $risk ?>"<?= $filterRisk === $risk ? " selected" : "" ?>><?= $label ?></option>

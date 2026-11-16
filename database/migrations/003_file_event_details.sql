@@ -1,7 +1,7 @@
--- Migration 002: richer file-event details
+-- Migration 003: richer file-event details
 --
 -- Adds only. No existing table is dropped and no existing row is deleted.
--- Run once, after 001_device_monitoring.sql. `php database_setup.php` applies
+-- Run once, after 001 and 002. `php database_setup.php` applies
 -- it automatically; running it by hand in MySQL Workbench / phpMyAdmin also
 -- works, and database_setup.php then records it as applied.
 
