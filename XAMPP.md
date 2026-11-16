@@ -154,3 +154,13 @@ You no longer need `START_MALICIOUSPROJECT.bat` / `STOP_MALICIOUSPROJECT.bat`.
 | Agent: "Connection refused" | Apache isn't started, or the address still has `:8000`. |
 
 > XAMPP's MySQL `root` account has no password by default. That is acceptable on a closed lab network; otherwise set one in phpMyAdmin (**User accounts → root → Change password**) and put it in `DB_PASS`.
+
+## Reset detection data and devices
+
+To start over with an empty activity history and no registered computers, while **keeping your accounts**:
+
+1. Optional backup: phpMyAdmin → **malwareguard** → **Export** → **Go**.
+2. phpMyAdmin → **Import** → choose `database\reset_detection_and_devices.sql` → **Import**.
+3. Add each PC again: dashboard → **Add a computer** → **Generate token**. On the PC, delete the agent's `data` folder and run `INSTALL_AGENT.bat` with the new token.
+
+The file also works on a brand-new server: it creates the database and every table first. The reset cannot be undone.
