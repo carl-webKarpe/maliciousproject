@@ -256,20 +256,20 @@ input:focus, select:focus { outline: 2px solid rgba(255, 79, 154, 0.5); outline-
 }
 
 /* ---- File activity colours (admin/devices.php?view=events) ------------ */
-.activity { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.activity.created  { --activity: #42f59e; }
-.activity.download { --activity: #ffc65c; }
-.activity.modified { --activity: #5ab4ff; }
-.activity.renamed  { --activity: #c08bff; }
-.activity.moved    { --activity: #3fe0d0; }
-.activity.deleted  { --activity: #ff8794; }
-.activity.folder-key { --activity: var(--muted); }
-.activity { color: var(--activity, var(--muted)); border-color: color-mix(in srgb, var(--activity, var(--muted)) 45%, transparent); background: color-mix(in srgb, var(--activity, var(--muted)) 10%, transparent); }
+/* Plain rgb/rgba values, so every browser shows them. */
+.activity { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1.6; white-space: nowrap; }
+.activity i { width: auto; }
 .activity-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
-.activity-table tr.activity-row td:first-child { border-left: 4px solid var(--activity, transparent); }
-.activity-row.created  { --activity: #42f59e; }
-.activity-row.download { --activity: #ffc65c; }
-.activity-row.modified { --activity: #5ab4ff; }
-.activity-row.renamed  { --activity: #c08bff; }
-.activity-row.moved    { --activity: #3fe0d0; }
-.activity-row.deleted  { --activity: #ff8794; }
+.activity.created { color: rgb(66, 245, 158); border-color: rgba(66, 245, 158, 0.45); background: rgba(66, 245, 158, 0.10); }
+.activity.download { color: rgb(255, 198, 92); border-color: rgba(255, 198, 92, 0.45); background: rgba(255, 198, 92, 0.10); }
+.activity.modified { color: rgb(90, 180, 255); border-color: rgba(90, 180, 255, 0.45); background: rgba(90, 180, 255, 0.10); }
+.activity.renamed { color: rgb(192, 139, 255); border-color: rgba(192, 139, 255, 0.45); background: rgba(192, 139, 255, 0.10); }
+.activity.moved { color: rgb(63, 224, 208); border-color: rgba(63, 224, 208, 0.45); background: rgba(63, 224, 208, 0.10); }
+.activity.deleted { color: rgb(255, 135, 148); border-color: rgba(255, 135, 148, 0.45); background: rgba(255, 135, 148, 0.10); }
+.activity.folder-key { color: rgb(168, 144, 157); border-color: rgba(168, 144, 157, 0.45); background: rgba(168, 144, 157, 0.10); }
+.activity-table tr.activity-row.created td:first-child { border-left: 4px solid rgb(66, 245, 158); }
+.activity-table tr.activity-row.download td:first-child { border-left: 4px solid rgb(255, 198, 92); }
+.activity-table tr.activity-row.modified td:first-child { border-left: 4px solid rgb(90, 180, 255); }
+.activity-table tr.activity-row.renamed td:first-child { border-left: 4px solid rgb(192, 139, 255); }
+.activity-table tr.activity-row.moved td:first-child { border-left: 4px solid rgb(63, 224, 208); }
+.activity-table tr.activity-row.deleted td:first-child { border-left: 4px solid rgb(255, 135, 148); }
