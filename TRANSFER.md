@@ -92,10 +92,10 @@ Under the adapter you use (**Ethernet adapter** for cable, **Wireless LAN adapte
 | Line | Example | What it is |
 | --- | --- | --- |
 | **Physical Address** | `A4-5E-60-12-34-56` | the MAC address (identifies the PC) |
-| **IPv4 Address** | `192.168.1.37` | its current IP |
+| **IPv4 Address** | `192.168.0.103` | its current IP |
 | **Default Gateway** | `192.168.1.1` | the router's address |
 
-**2. Open the router's settings.** In a browser on any PC connected to it, go to the **Default Gateway** address, e.g. `http://192.168.1.1`. Sign in with the router's admin username and password. These are usually printed on a sticker on the router; ask your ISP or network admin if they were changed.
+**2. Open the router's settings.** In a browser on any PC connected to it, go to the **Default Gateway** address, e.g. `http://192.168.0.1`. Sign in with the router's admin username and password. These are usually printed on a sticker on the router; ask your ISP or network admin if they were changed.
 
 **3. Find the DHCP reservation page.** The name depends on the router:
 
@@ -107,7 +107,7 @@ Under the adapter you use (**Ethernet adapter** for cable, **Wireless LAN adapte
 
 **4. Add a reservation:**
 - **MAC address:** the server's **Physical Address** from step 1 (some routers want `:` instead of `-`, e.g. `A4:5E:60:12:34:56`)
-- **IP address:** the address the server should always get. The simplest choice is the one it has now (e.g. `192.168.1.37`), or pick an easy one in the same range, such as `192.168.1.100`
+- **IP address:** the address the server should always get. The simplest choice is the one it has now (e.g. `192.168.0.103`), or pick an easy one in the same range, such as `192.168.0.103`
 - **Save / Apply**
 
 **5. Make the server pick up the address.** On the server PC, in Command Prompt **as Administrator**:
@@ -118,7 +118,7 @@ ipconfig
 ```
 (or just restart the PC). The **IPv4 Address** must now be the reserved one. **This is your server address from now on**, for example:
 ```
-http://192.168.1.100/MaliciousProject
+http://192.168.0.103/MaliciousProject
 ```
 
 **No access to the router?** Ask the network admin to reserve an IP for the server PC's MAC address. As a last resort you can set a static IP in Windows (*Settings → Network & internet → Ethernet → IP assignment → Edit → Manual*), using an address **outside** the router's automatic range plus the same gateway and DNS. A reservation on the router is safer because it can't clash with another device.
@@ -139,7 +139,7 @@ and set the network to **Private**: *Settings → Network & internet → Etherne
 
 **4. Test from another PC** on the same network, in a browser:
 ```
-http://192.168.1.100/MaliciousProject/api/health.php
+http://192.168.0.103/MaliciousProject/api/health.php
 ```
 It must show `"ok":true`. If it doesn't load, recheck step 1 and that both PCs are on the same router.
 
@@ -149,13 +149,13 @@ It must show `"ok":true`. If it doesn't load, recheck step 1 and that both PCs a
 
 The new server has no registered computers, so each PC joins again **once** with a new token. After that, auto-start keeps it connected.
 
-**1. On the server dashboard:** open `http://192.168.1.100/MaliciousProject/admin/login.html` → **Add a computer** → type the PC's name → **Generate token** → copy it.
+**1. On the server dashboard:** open `http://192.168.0.103/MaliciousProject/admin/login.html` → **Add a computer** → type the PC's name → **Generate token** → copy it.
 
 **2. On the monitored PC**, in its `agent` folder:
 1. Run **`STOP_AGENT.bat`**.
 2. Delete the **`data`** folder (it belongs to the old server).
 3. Run **`INSTALL_AGENT.bat`** and enter:
-   - **Server address:** `http://192.168.1.100/MaliciousProject` (your reserved IP from Part 3)
+   - **Server address:** `http://192.168.0.103/MaliciousProject` (your reserved IP from Part 3)
    - **Token:** the token from step 1
    - **Start automatically?** press Enter (Yes)
 
@@ -163,7 +163,7 @@ The new server has no registered computers, so each PC joins again **once** with
 
 Repeat Part 5 for every monitored PC.
 
-> To save typing on new PCs: in the server's project folder, edit `agent\INSTALL_AGENT.bat` and change the `DEFAULT_SERVER=` line at the top to your new address, e.g. `set "DEFAULT_SERVER=http://192.168.1.100/MaliciousProject"`. Then copy the `agent` folder (without `.venv` and `data`) to each PC; at the address question just press Enter.
+> To save typing on new PCs: in the server's project folder, edit `agent\INSTALL_AGENT.bat` and change the `DEFAULT_SERVER=` line at the top to your new address, e.g. `set "DEFAULT_SERVER=http://192.168.0.103/MaliciousProject"`. Then copy the `agent` folder (without `.venv` and `data`) to each PC; at the address question just press Enter.
 
 ---
 

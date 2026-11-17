@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 rem Server address offered by default (press Enter to accept it).
 rem XAMPP/Apache: http://IP/MaliciousProject   Built-in server: http://IP:8000
-set "DEFAULT_SERVER=http://10.46.124.4/MaliciousProject"
+set "DEFAULT_SERVER=http://192.168.0.103/MaliciousProject"
 title Install MalwareGuard agent
 cd /d "%~dp0"
 
